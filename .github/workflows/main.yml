@@ -1,0 +1,69 @@
+name: Check build/run/tests
+
+on:
+  schedule:
+    # Polish time: 6AM
+    - cron: "0 4 * * *"
+  push:
+    branches: [main]
+  pull_request:
+      # as by default
+      types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checking out
+      uses: actions/checkout@v4
+    - name: Setting up dependencies
+      run: |
+        sudo apt install libboost-program-options-dev \
+          libcurl4-openssl-dev
+    - name: Setting up google-cloud-cpp
+      run: |
+        vcpkg install google-cloud-cpp[core,texttospeech]
+    - name: Building target app
+      run: |
+        mkdir build && cd build && cmake .. && make
+      
+  execution:
+    name: Execution
+    # needs: [build]
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checking out
+      uses: actions/checkout@v4
+    - name: Setting up dependencies
+      run: |
+        sudo apt install libboost-program-options-dev \
+          libcurl4-openssl-dev
+    - name: Setting up google-cloud-cpp
+      run: |
+        vcpkg install google-cloud-cpp[core,texttospeech]
+    - name: Preparing binary
+      run: |
+        mkdir build && cd build && cmake .. && make
+    - name: Executing program
+      run: build/roarm --help
+
+  test:
+    name: Test [WIP]
+    runs-on: ubuntu-latest
+    environment: test
+
+    steps:
+    - name: Checking out
+      uses: actions/checkout@v4
+    - name: Building tests
+      run: |
+        cd tests && mkdir build && cd build &&
+        cmake .. && make
+    - name: Running tests
+      run: |
+        ctest --output-on-failure --test-dir tests/build/
