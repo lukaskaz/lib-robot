@@ -1,4 +1,5 @@
 #include "display.hpp"
+#include "tts/interfaces/googlecloud.hpp"
 
 #include <boost/program_options.hpp>
 
@@ -40,7 +41,12 @@ int main(int argc, char* argv[])
 
     try
     {
-        Display().run();
+        auto ttsIf =
+            tts::TextToVoiceFactory<tts::googlecloud::TextToVoice>::create(
+                {tts::language::polish, tts::gender::female, 1});
+        auto httpIf = http::HttpIfFactory<http::cpr::Http>::create();
+        auto robotIf = std::make_shared<Robothandler>(httpIf, ttsIf);
+        Display(robotIf).run();
     }
     catch (const std::exception& ex)
     {

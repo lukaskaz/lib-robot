@@ -7,10 +7,13 @@
 #include <cstdlib>
 #include <iostream>
 
+namespace http::cpr
+{
+
 static constexpr auto httpipaddrvar = "HTTPIPADDRESS";
 using json = nlohmann::json;
 
-struct Httphandler::Handler
+struct Http::Handler
 {
   public:
     Handler() :
@@ -26,7 +29,7 @@ struct Httphandler::Handler
     std::string getmethod(const std::string& params)
     {
         auto json = json::parse(params);
-        auto resp = cpr::Get(cpr::Url{url + params});
+        auto resp = ::cpr::Get(::cpr::Url{url + params});
         if (resp.status_code == 200)
         {
             return resp.text;
@@ -58,17 +61,19 @@ struct Httphandler::Handler
     }
 };
 
-Httphandler::Httphandler() : handler{std::make_unique<Handler>()}
+Http::Http() : handler{std::make_unique<Handler>()}
 {}
 
-Httphandler::~Httphandler() = default;
+Http::~Http() = default;
 
-std::string Httphandler::get(const std::string& params)
+std::string Http::get(const std::string& params)
 {
     return handler->getmethod(params);
 }
 
-std::string Httphandler::info()
+std::string Http::info()
 {
     return handler->getinfo();
 }
+
+} // namespace http::cpr
