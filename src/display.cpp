@@ -2,23 +2,23 @@
 
 #include "climenu.hpp"
 #include "helpers.hpp"
-#include "robotmgmt.hpp"
 
 #include <functional>
 #include <iostream>
+#include <memory>
 
 struct Display::Handler
 {
   public:
-    Handler() : robot{std::make_shared<Robothandler>()}
+    Handler(std::shared_ptr<Robothandler> robotIf) : robotIf{robotIf}
     {
         std::cout << "Initiating robot\n";
-        robot->engage();
+        robotIf->engage();
     }
     ~Handler()
     {
         std::cout << "Cleaning and closing\n";
-        robot->disengage();
+        robotIf->disengage();
     }
 
     void exitprogram()
@@ -27,38 +27,40 @@ struct Display::Handler
     void showmenu()
     {
         Menu menu{
-            "[JSON commands via " + robot->conninfo() + " on " +
+            "[JSON commands via " + robotIf->conninfo() + " on " +
                 robothelpers::gettimestr() + "]",
-            {{"get wifi info", std::bind(&Robothandler::readwifiinfo, robot)},
+            {{"get wifi info", std::bind(&Robothandler::readwifiinfo, robotIf)},
              {"get device info",
-              std::bind(&Robothandler::readdeviceinfo, robot)},
+              std::bind(&Robothandler::readdeviceinfo, robotIf)},
              {"get servos position",
-              std::bind(&Robothandler::readservosinfo, robot)},
+              std::bind(&Robothandler::readservosinfo, robotIf)},
              {"unlock torque",
-              std::bind(&Robothandler::settorqueunlocked, robot)},
-             {"lock torque", std::bind(&Robothandler::settorquelocked, robot)},
-             {"open clamp", std::bind(&Robothandler::openeoat, robot)},
-             {"close clamp", std::bind(&Robothandler::closeeoat, robot)},
-             {"shake hand", std::bind(&Robothandler::shakehand, robot)},
-             {"dance", std::bind(&Robothandler::dance, robot)},
-             {"enlight", std::bind(&Robothandler::enlight, robot)},
-             {"move base", std::bind(&Robothandler::movebase, robot)},
-             {"move left", std::bind(&Robothandler::moveleft, robot)},
-             {"move right", std::bind(&Robothandler::moveright, robot)},
-             {"move parked", std::bind(&Robothandler::moveparked, robot)},
-             {"set led on", std::bind(&Robothandler::setledon, robot, 255)},
-             {"set led off", std::bind(&Robothandler::setledoff, robot)},
+              std::bind(&Robothandler::settorqueunlocked, robotIf)},
+             {"lock torque",
+              std::bind(&Robothandler::settorquelocked, robotIf)},
+             {"open clamp", std::bind(&Robothandler::openeoat, robotIf)},
+             {"close clamp", std::bind(&Robothandler::closeeoat, robotIf)},
+             {"shake hand", std::bind(&Robothandler::shakehand, robotIf)},
+             {"dance", std::bind(&Robothandler::dance, robotIf)},
+             {"enlight", std::bind(&Robothandler::enlight, robotIf)},
+             {"move base", std::bind(&Robothandler::movebase, robotIf)},
+             {"move left", std::bind(&Robothandler::moveleft, robotIf)},
+             {"move right", std::bind(&Robothandler::moveright, robotIf)},
+             {"move parked", std::bind(&Robothandler::moveparked, robotIf)},
+             {"set led on", std::bind(&Robothandler::setledon, robotIf, 255)},
+             {"set led off", std::bind(&Robothandler::setledoff, robotIf)},
              {"send user command",
-              std::bind(&Robothandler::sendusercmd, robot)},
+              std::bind(&Robothandler::sendusercmd, robotIf)},
              {"exit program", [this]() { exitprogram(); }}}};
         menu.run();
     }
 
   public:
-    std::shared_ptr<Robothandler> robot;
+    std::shared_ptr<Robothandler> robotIf;
 };
 
-Display::Display() : handler{std::make_unique<Handler>()}
+Display::Display(std::shared_ptr<Robothandler> robotIf) :
+    handler{std::make_unique<Handler>(robotIf)}
 {}
 
 Display::~Display() = default;

@@ -1,12 +1,16 @@
 #pragma once
 
+#include "httphandler.hpp"
+#include "tts/factory.hpp"
+
 #include <cstdint>
 #include <memory>
 
 class Robothandler
 {
   public:
-    Robothandler();
+    Robothandler(std::shared_ptr<http::HttpIf>,
+                 std::shared_ptr<tts::TextToVoiceIf>);
     ~Robothandler();
 
     void readwifiinfo();

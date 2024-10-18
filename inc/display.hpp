@@ -1,11 +1,13 @@
 #pragma once
 
+#include "robotmgmt.hpp"
+
 #include <memory>
 
 class Display
 {
   public:
-    Display();
+    Display(std::shared_ptr<Robothandler>);
     ~Display();
 
     void run();

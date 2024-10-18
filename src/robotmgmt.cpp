@@ -1,8 +1,6 @@
 #include "robotmgmt.hpp"
 
 #include "climenu.hpp"
-#include "httphandler.hpp"
-#include "tts/interfaces/googlecloud.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -10,6 +8,7 @@
 #include <cmath>
 #include <future>
 #include <iostream>
+#include <memory>
 #include <random>
 
 using json = nlohmann::json;
@@ -18,10 +17,10 @@ using xyzt_t = std::tuple<int32_t, int32_t, int32_t, double>;
 struct Robothandler::Handler
 {
   public:
-    Handler(std::shared_ptr<Httphandler> conn,
-            std::shared_ptr<tts::TextToVoiceIf> tts) :
-        http{conn},
-        tts{tts}
+    Handler(std::shared_ptr<http::HttpIf> httpIf,
+            std::shared_ptr<tts::TextToVoiceIf> ttsIf) :
+        httpIf{httpIf},
+        ttsIf{ttsIf}
     {}
 
     std::string str(auto num)
@@ -95,26 +94,24 @@ struct Robothandler::Handler
 
     std::string sendcommand(const std::string& cmd)
     {
-        return http->get(cmd);
+        return httpIf->get(cmd);
     }
 
   public:
-    std::shared_ptr<Httphandler> http;
-    std::shared_ptr<tts::TextToVoiceIf> tts;
+    std::shared_ptr<http::HttpIf> httpIf;
+    std::shared_ptr<tts::TextToVoiceIf> ttsIf;
 };
 
-Robothandler::Robothandler() :
-    handler{std::make_unique<Handler>(
-        std::make_shared<Httphandler>(),
-        tts::TextToVoiceFactory<tts::googlecloud::TextToVoice>::create(
-            {tts::language::polish, tts::gender::female, 1}))}
+Robothandler::Robothandler(std::shared_ptr<http::HttpIf> httpIf,
+                           std::shared_ptr<tts::TextToVoiceIf> ttsIf) :
+    handler{std::make_unique<Handler>(httpIf, ttsIf)}
 {}
 
 Robothandler::~Robothandler() = default;
 
 std::string Robothandler::conninfo()
 {
-    return handler->http->info();
+    return handler->httpIf->info();
 }
 
 void Robothandler::readwifiinfo()
@@ -168,7 +165,7 @@ void Robothandler::setledoff()
 void Robothandler::movebase()
 {
     handler->sendcommand(R"({"T":100})");
-    handler->tts->speak("Robot gotowy do działania");
+    handler->ttsIf->speak("Robot gotowy do działania");
 }
 
 void Robothandler::moveleft()
@@ -186,7 +183,7 @@ void Robothandler::shakehand()
 {
     handler->movehandshakepos();
     std::future<void> ttscall = std::async(std::launch::async, [this]() {
-        handler->tts->speak("No podaj łapę no!");
+        handler->ttsIf->speak("No podaj łapę no!");
     });
     usleep(2 * 1000 * 1000);
     auto initpos = handler->getxyz();
@@ -200,7 +197,7 @@ void Robothandler::shakehand()
             if (handler->geteoatangle() < eoatclosedangle)
             {
                 ttscall = std::async(std::launch::async, [this]() {
-                    handler->tts->speak("Czeeeeść czołem kluski z rosołem");
+                    handler->ttsIf->speak("Czeeeeść czołem kluski z rosołem");
                 });
                 for (uint8_t cnt{}; cnt < 3; cnt++)
                 {
@@ -208,14 +205,14 @@ void Robothandler::shakehand()
                 }
                 handler->movehandshakepos();
                 ttscall = std::async(std::launch::async, [this]() {
-                    handler->tts->speak("Dobra wystarczy bo się zagłaskamy");
+                    handler->ttsIf->speak("Dobra wystarczy bo się zagłaskamy");
                 });
                 usleep(1000 * 1000);
                 break;
             }
             ttscall = std::async(std::launch::async, [this]() {
-                handler->tts->speak("Nie chcesz? A to spierdalaj!");
-                handler->tts->speak(
+                handler->ttsIf->speak("Nie chcesz? A to spierdalaj!");
+                handler->ttsIf->speak(
                     "Ale to nie chlew, może się jednak przywitasz?");
             });
             handler->movehandshakepos();
@@ -230,7 +227,7 @@ void Robothandler::dance()
 {
     std::atomic<bool> singing{true};
     handler->movedancebasepos();
-    handler->tts->speak("Zapraszasz do tańca? :)");
+    handler->ttsIf->speak("Zapraszasz do tańca? :)");
     auto ttscall = std::async(std::launch::async, [this, &singing]() {
         auto phrases = std::to_array<std::string>(
             {"Przez twe oczy, te oczy zielone oszalałam!", "Lalala!",
@@ -239,10 +236,10 @@ void Robothandler::dance()
         while (singing)
         {
             auto num = (cnt++) % phrases.size();
-            handler->tts->speak(phrases[num]);
+            handler->ttsIf->speak(phrases[num]);
             usleep(250 * 1000);
         }
-        handler->tts->speak("Co to?? Masz już dość?? HEHE HEHE!");
+        handler->ttsIf->speak("Co to?? Masz już dość?? HEHE HEHE!");
     });
 
     auto ledcall = std::async(std::launch::async, [this, &singing]() {
@@ -296,8 +293,9 @@ void Robothandler::moveparked()
 
 void Robothandler::enlight()
 {
-    auto ttscall = std::async(
-        std::launch::async, [this]() { handler->tts->speak("Oświecić cię?"); });
+    auto ttscall = std::async(std::launch::async, [this]() {
+        handler->ttsIf->speak("Oświecić cię?");
+    });
     setledoff();
     handler->movehandshakepos();
     handler->movetopos({424, 75, 168, handler->dgrtorad(180 - 0)});
@@ -310,7 +308,7 @@ void Robothandler::enlight()
             setledon((uint8_t)level);
             usleep(10 * 1000);
         }
-        handler->tts->speak("Klepnij enter żeby zakończyć");
+        handler->ttsIf->speak("Klepnij enter żeby zakończyć");
     });
 
     while (!Menu::isenterpressed())
@@ -320,7 +318,7 @@ void Robothandler::enlight()
 
     ledcall.wait();
     ttscall = std::async(std::launch::async, [this]() {
-        handler->tts->speak("Oświecenie zakończone");
+        handler->ttsIf->speak("Oświecenie zakończone");
     });
 
     ledcall = std::async(std::launch::async, [this]() {
@@ -341,7 +339,7 @@ void Robothandler::enlight()
 void Robothandler::engage()
 {
     auto ttscall = std::async(std::launch::async, [this]() {
-        handler->tts->speak("Rozpoczynam inicjalizację");
+        handler->ttsIf->speak("Rozpoczynam inicjalizację");
     });
     movebase();
     ttscall.wait();
@@ -350,7 +348,7 @@ void Robothandler::engage()
 void Robothandler::disengage()
 {
     auto ttscall = std::async(std::launch::async, [this]() {
-        handler->tts->speak("Robot został odstawiony");
+        handler->ttsIf->speak("Robot został odstawiony");
     });
     setledoff();
     moveparked();
