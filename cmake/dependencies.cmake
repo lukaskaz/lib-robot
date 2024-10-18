@@ -85,9 +85,8 @@ EXTERNALPROJECT_ADD(
   SOURCE_DIR        ${source_dir}
   BINARY_DIR        ${build_dir}
   CONFIGURE_COMMAND mkdir /${build_dir}/build &> /dev/null
-  BUILD_COMMAND     cd ${build_dir}/build && cmake 
-    -DCMAKE_TOOLCHAIN_FILE=$ENV{VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake 
-    -DBUILD_SHARED_LIBS=ON ${source_dir} && make
+  BUILD_COMMAND     cd ${build_dir}/build &&
+    cmake -DBUILD_SHARED_LIBS=ON ${source_dir} && make
   UPDATE_COMMAND    ""
   INSTALL_COMMAND   "" 
   TEST_COMMAND      ""
