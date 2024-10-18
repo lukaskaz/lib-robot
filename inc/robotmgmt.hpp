@@ -1,7 +1,7 @@
 #pragma once
 
-#include "httphandler.hpp"
-#include "tts/factory.hpp"
+#include "http/interfaces/http.hpp"
+#include "tts/interfaces/texttovoice.hpp"
 
 #include <cstdint>
 #include <memory>

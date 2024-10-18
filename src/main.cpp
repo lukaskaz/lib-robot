@@ -1,4 +1,5 @@
 #include "display.hpp"
+#include "http/interfaces/cpr.hpp"
 #include "tts/interfaces/googlecloud.hpp"
 
 #include <boost/program_options.hpp>
@@ -10,7 +11,7 @@ void signalHandler(int signal)
 {
     if (signal == SIGINT)
     {
-        // block ctrl+c signal
+        // blocking ctrl+c signal
     }
 }
 
@@ -46,7 +47,8 @@ int main(int argc, char* argv[])
                 {tts::language::polish, tts::gender::female, 1});
         auto httpIf = http::HttpIfFactory<http::cpr::Http>::create();
         auto robotIf = std::make_shared<Robothandler>(httpIf, ttsIf);
-        Display(robotIf).run();
+        auto menu = Display(robotIf);
+        menu.run();
     }
     catch (const std::exception& ex)
     {
