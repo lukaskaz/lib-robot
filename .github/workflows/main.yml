@@ -21,11 +21,7 @@ jobs:
       uses: actions/checkout@v4
     - name: Setting up dependencies
       run: |
-        sudo apt install libboost-program-options-dev \
-          libcurl4-openssl-dev
-    - name: Setting up google-cloud-cpp
-      run: |
-        vcpkg install google-cloud-cpp[core,texttospeech]
+        sudo apt install libboost-program-options-dev
     - name: Building target app
       run: |
         mkdir build && cd build && cmake .. && make
@@ -41,11 +37,7 @@ jobs:
       uses: actions/checkout@v4
     - name: Setting up dependencies
       run: |
-        sudo apt install libboost-program-options-dev \
-          libcurl4-openssl-dev
-    - name: Setting up google-cloud-cpp
-      run: |
-        vcpkg install google-cloud-cpp[core,texttospeech]
+        sudo apt install libboost-program-options-dev
     - name: Preparing binary
       run: |
         mkdir build && cd build && cmake .. && make
