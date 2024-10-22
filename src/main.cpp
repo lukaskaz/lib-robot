@@ -42,12 +42,15 @@ int main(int argc, char* argv[])
 
     try
     {
+        auto voice =
+            tts::voice_t(tts::language::polish, tts::gender::female, 1);
         auto ttsIf =
             tts::TextToVoiceFactory<tts::googlecloud::TextToVoice>::create(
-                {tts::language::polish, tts::gender::female, 1});
+                voice);
+        auto ttsSetup = std::make_shared<robot::TtsSetup>(voice, ttsIf);
         auto httpIf = http::HttpIfFactory<http::cpr::Http>::create();
-        auto robotIf = std::make_shared<Robothandler>(httpIf, ttsIf);
-        auto menu = Display(robotIf);
+        auto robotIf = std::make_shared<robot::Robothandler>(httpIf, ttsSetup);
+        auto menu = display::Display(robotIf);
         menu.run();
     }
     catch (const std::exception& ex)

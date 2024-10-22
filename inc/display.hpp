@@ -1,13 +1,15 @@
 #pragma once
 
-#include "robotmgmt.hpp"
+#include "robot/interfaces/robotmgmt.hpp"
 
 #include <memory>
 
+namespace display
+{
 class Display
 {
   public:
-    Display(std::shared_ptr<Robothandler>);
+    Display(std::shared_ptr<robot::RobotIf>);
     ~Display();
 
     void run();
@@ -16,3 +18,5 @@ class Display
     struct Handler;
     std::unique_ptr<Handler> handler;
 };
+
+} // namespace display
