@@ -378,7 +378,8 @@ struct Robothandler::Handler
     {
         if (tts)
         {
-            ttsasync.valid() ? ttsasync.wait() : void{};
+            if (ttsasync.valid())
+                ttsasync.wait();
             ttsasync = std::async(std::launch::async, [this, what]() {
                 auto inlang = std::get<0>(tts->voice);
                 tts->iface->speak(getttstext(what, inlang));
