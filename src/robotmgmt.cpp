@@ -22,9 +22,9 @@ struct Robothandler::Handler
 {
   public:
     Handler(std::shared_ptr<http::HttpIf> httpIf,
-            std::shared_ptr<TtsSetup> ttsSetup) :
+            std::shared_ptr<tts::TextToVoiceIf> ttsIf) :
         httpIf{httpIf},
-        tts{ttsSetup}
+        ttsIf{ttsIf}
     {
         if (!this->httpIf)
         {
@@ -289,15 +289,73 @@ struct Robothandler::Handler
 
     void changevoice()
     {
-        [[maybe_unused]] auto newvoice =
-            std::get<1>(tts->voice) == tts::gender::female
-                ? tts::gender::male
-                : tts::gender::female;
+        speak(task::voicechangestart);
+        auto voice = ttsIf->getvoice();
+        auto& gender = std::get<1>(voice);
+        gender = gender == tts::gender::male ? tts::gender::female
+                                             : tts::gender::male;
+        waitspeakdone();
+        ttsIf->setvoice(voice);
+        speak(task::voicechangeend);
+    }
+
+    void changelangtopolish()
+    {
+        auto voice = ttsIf->getvoice();
+        auto& lang = std::get<0>(voice);
+        if (lang != tts::language::polish)
+        {
+            lang = tts::language::polish;
+            speak(task::langchangestart);
+            waitspeakdone();
+            ttsIf->setvoice(voice);
+            speak(task::langchangeend);
+        }
+        else
+        {
+            speak(task::nothingtodo);
+        }
+    }
+
+    void changelangtoenglish()
+    {
+        auto voice = ttsIf->getvoice();
+        auto& lang = std::get<0>(voice);
+        if (lang != tts::language::english)
+        {
+            lang = tts::language::english;
+            speak(task::langchangestart);
+            waitspeakdone();
+            ttsIf->setvoice(voice);
+            speak(task::langchangeend);
+        }
+        else
+        {
+            speak(task::nothingtodo);
+        }
+    }
+
+    void changelangtogerman()
+    {
+        auto voice = ttsIf->getvoice();
+        auto& lang = std::get<0>(voice);
+        if (lang != tts::language::german)
+        {
+            lang = tts::language::german;
+            speak(task::langchangestart);
+            waitspeakdone();
+            ttsIf->setvoice(voice);
+            speak(task::langchangeend);
+        }
+        else
+        {
+            speak(task::nothingtodo);
+        }
     }
 
   private:
     std::shared_ptr<http::HttpIf> httpIf;
-    std::shared_ptr<TtsSetup> tts;
+    std::shared_ptr<tts::TextToVoiceIf> ttsIf;
     std::future<void> ttsasync;
 
     std::string str(auto num)
@@ -376,21 +434,28 @@ struct Robothandler::Handler
 
     void speak(task what)
     {
-        if (tts)
+        if (ttsIf)
         {
-            if (ttsasync.valid())
-                ttsasync.wait();
+            waitspeakdone();
             ttsasync = std::async(std::launch::async, [this, what]() {
-                auto inlang = std::get<0>(tts->voice);
-                tts->iface->speak(getttstext(what, inlang));
+                auto inlang = std::get<0>(ttsIf->getvoice());
+                ttsIf->speak(getttstext(what, inlang));
             });
+        }
+    }
+
+    void waitspeakdone()
+    {
+        if (ttsasync.valid())
+        {
+            ttsasync.wait();
         }
     }
 };
 
 Robothandler::Robothandler(std::shared_ptr<http::HttpIf> httpIf,
-                           std::shared_ptr<TtsSetup> ttsSetup) :
-    handler{std::make_unique<Handler>(httpIf, ttsSetup)}
+                           std::shared_ptr<tts::TextToVoiceIf> ttsIf) :
+    handler{std::make_unique<Handler>(httpIf, ttsIf)}
 {}
 
 Robothandler::~Robothandler() = default;
@@ -498,6 +563,21 @@ void Robothandler::sendusercmd()
 void Robothandler::changevoice()
 {
     handler->changevoice();
+}
+
+void Robothandler::changelangtopolish()
+{
+    handler->changelangtopolish();
+}
+
+void Robothandler::changelangtoenglish()
+{
+    handler->changelangtoenglish();
+}
+
+void Robothandler::changelangtogerman()
+{
+    handler->changelangtogerman();
 }
 
 } // namespace robot
