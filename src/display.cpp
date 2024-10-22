@@ -55,6 +55,13 @@ struct Display::Handler
              {"set led off", std::bind(&robot::RobotIf::setledoff, robotIf)},
              {"send user command",
               std::bind(&robot::RobotIf::sendusercmd, robotIf)},
+             {"change voice", std::bind(&robot::RobotIf::changevoice, robotIf)},
+             {"change language to polish",
+              std::bind(&robot::RobotIf::changelangtopolish, robotIf)},
+             {"change language to english",
+              std::bind(&robot::RobotIf::changelangtoenglish, robotIf)},
+             {"change language to german",
+              std::bind(&robot::RobotIf::changelangtogerman, robotIf)},
              {"exit program", [this]() { exitprogram(); }}}};
         menu.run();
     }

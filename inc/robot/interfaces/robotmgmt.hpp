@@ -9,12 +9,6 @@
 namespace robot
 {
 
-struct TtsSetup
-{
-    tts::voice_t voice;
-    std::shared_ptr<tts::TextToVoiceIf> iface;
-};
-
 class RobotIf
 {
   public:
@@ -42,6 +36,9 @@ class RobotIf
     virtual void disengage() = 0;
 
     virtual void changevoice() = 0;
+    virtual void changelangtopolish() = 0;
+    virtual void changelangtoenglish() = 0;
+    virtual void changelangtogerman() = 0;
 
     virtual std::string conninfo() = 0;
 };
@@ -49,7 +46,8 @@ class RobotIf
 class Robothandler : public RobotIf
 {
   public:
-    Robothandler(std::shared_ptr<http::HttpIf>, std::shared_ptr<TtsSetup>);
+    Robothandler(std::shared_ptr<http::HttpIf>,
+                 std::shared_ptr<tts::TextToVoiceIf>);
     ~Robothandler();
 
     void readwifiinfo() override;
@@ -74,6 +72,9 @@ class Robothandler : public RobotIf
     void disengage() override;
 
     void changevoice() override;
+    void changelangtopolish() override;
+    void changelangtoenglish() override;
+    void changelangtogerman() override;
 
     std::string conninfo() override;
 

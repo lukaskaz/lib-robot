@@ -23,8 +23,13 @@ enum class task
     songlineforth,
     danceend,
     enlightstart,
-    enlightbreak,
     enlightend,
+    enlightbreak,
+    voicechangestart,
+    voicechangeend,
+    langchangestart,
+    langchangeend,
+    nothingtodo
 };
 
 std::string getttstext(task, tts::language);
