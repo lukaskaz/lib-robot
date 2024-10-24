@@ -1,5 +1,9 @@
 #include "display.hpp"
 #include "http/interfaces/cpr.hpp"
+#include "log/interfaces/collection.hpp"
+#include "log/interfaces/console.hpp"
+#include "log/interfaces/storage.hpp"
+#include "robot/interfaces/roarmm2.hpp"
 #include "tts/interfaces/googlecloud.hpp"
 
 #include <boost/program_options.hpp>
@@ -17,15 +21,18 @@ void signalHandler(int signal)
 
 int main(int argc, char* argv[])
 {
+    uint32_t loglvl = 1;
     std::signal(SIGINT, signalHandler);
     if (argc > 1)
-        [argc, argv]() {
+        [argc, argv, &loglvl]() {
             boost::program_options::options_description desc("Allowed options");
             desc.add_options()("help,h", "produce help message")(
                 "address,a", boost::program_options::value<std::string>(),
                 "serial device node")(
                 "speed,s", boost::program_options::value<std::string>(),
-                "speed of serial communication");
+                "speed of serial communication")(
+                "loglvl,l", boost::program_options::value<uint32_t>(),
+                "level of logging [0-4], default error [1]");
 
             boost::program_options::variables_map vm;
             boost::program_options::store(
@@ -38,15 +45,26 @@ int main(int argc, char* argv[])
                 std::cout << desc;
                 exit(0);
             }
+
+            loglvl =
+                vm.contains("loglvl") ? vm.at("loglvl").as<uint32_t>() : loglvl;
         }();
 
     try
     {
+        auto lvl = static_cast<logging::type>(loglvl);
+        auto logconsole =
+            logging::LogFactory::create<logging::console::Log>(lvl);
+        auto logstorage =
+            logging::LogFactory::create<logging::storage::Log>(lvl);
+        auto logIf = logging::LogFactory::create<logging::collection::Log>(
+            {logconsole, logstorage});
+        auto httpIf = http::HttpFactory::create<http::cpr::Http>();
         auto ttsIf =
             tts::TextToVoiceFactory<tts::googlecloud::TextToVoice>::create(
                 tts::voice_t(tts::language::polish, tts::gender::female, 1));
-        auto httpIf = http::HttpIfFactory<http::cpr::Http>::create();
-        auto robotIf = std::make_shared<robot::Robothandler>(httpIf, ttsIf);
+        auto robotIf = robot::RobotFactory::create<robot::roarmm2::Robot>(
+            httpIf, ttsIf, logIf);
         auto menu = display::Display(robotIf);
         menu.run();
     }

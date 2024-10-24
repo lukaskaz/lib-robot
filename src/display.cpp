@@ -4,7 +4,6 @@
 #include "robot/helpers.hpp"
 
 #include <functional>
-#include <iostream>
 #include <memory>
 
 namespace display
@@ -15,12 +14,10 @@ struct Display::Handler
   public:
     Handler(std::shared_ptr<robot::RobotIf> robotIf) : robotIf{robotIf}
     {
-        std::cout << "Initiating robot\n";
         robotIf->engage();
     }
     ~Handler()
     {
-        std::cout << "Cleaning and closing\n";
         robotIf->disengage();
     }
 

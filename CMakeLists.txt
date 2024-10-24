@@ -23,11 +23,13 @@ add_dependencies(${PROJECT_NAME} libnlohmann)
 add_dependencies(${PROJECT_NAME} libhttp)
 add_dependencies(${PROJECT_NAME} libtts)
 add_dependencies(${PROJECT_NAME} libshellcmd)
+add_dependencies(${PROJECT_NAME} liblogger)
 
 target_link_libraries(${PROJECT_NAME}
     climenu
     http
     tts
     shellcmd
+    logger
     ${Boost_LIBRARIES}
 )

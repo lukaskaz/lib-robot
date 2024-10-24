@@ -43,44 +43,4 @@ class RobotIf
     virtual std::string conninfo() = 0;
 };
 
-class Robothandler : public RobotIf
-{
-  public:
-    Robothandler(std::shared_ptr<http::HttpIf>,
-                 std::shared_ptr<tts::TextToVoiceIf>);
-    ~Robothandler();
-
-    void readwifiinfo() override;
-    void readservosinfo() override;
-    void settorqueunlocked() override;
-    void settorquelocked() override;
-    void openeoat() override;
-    void closeeoat() override;
-    void readdeviceinfo() override;
-    void setledon(uint8_t lvl) override;
-    void setledoff() override;
-    void movebase() override;
-    void moveleft() override;
-    void moveright() override;
-    void moveparked() override;
-    void sendusercmd() override;
-
-    void shakehand() override;
-    void dance() override;
-    void enlight() override;
-    void engage() override;
-    void disengage() override;
-
-    void changevoice() override;
-    void changelangtopolish() override;
-    void changelangtoenglish() override;
-    void changelangtogerman() override;
-
-    std::string conninfo() override;
-
-  private:
-    struct Handler;
-    std::unique_ptr<Handler> handler;
-};
-
 } // namespace robot
