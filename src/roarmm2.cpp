@@ -1,4 +1,4 @@
-#include "robot/interfaces/robotmgmt.hpp"
+#include "robot/interfaces/roarmm2.hpp"
 
 #include "climenu.hpp"
 #include "robot/ttstexts.hpp"
@@ -12,19 +12,20 @@
 #include <memory>
 #include <random>
 
-namespace robot
+namespace robot::roarmm2
 {
 
 using json = nlohmann::json;
 using xyzt_t = std::tuple<int32_t, int32_t, int32_t, double>;
 
-struct Robothandler::Handler
+struct Robot::Handler
 {
   public:
     Handler(std::shared_ptr<http::HttpIf> httpIf,
-            std::shared_ptr<tts::TextToVoiceIf> ttsIf) :
+            std::shared_ptr<tts::TextToVoiceIf> ttsIf,
+            std::shared_ptr<logging::LogIf> logIf) :
         httpIf{httpIf},
-        ttsIf{ttsIf}
+        ttsIf{ttsIf}, logIf{logIf}
     {
         if (!this->httpIf)
         {
@@ -256,7 +257,7 @@ struct Robothandler::Handler
 
     void sendusercmd()
     {
-        static const auto exitTag = "q";
+        static const std::string exitTag = "q";
 
         std::cout << "Commands mode, to exit enter: " << exitTag << "\n";
         while (true)
@@ -353,9 +354,15 @@ struct Robothandler::Handler
         }
     }
 
+    void log(const std::string& msg)
+    {
+        logIf->log(logging::type::info, msg);
+    }
+
   private:
     std::shared_ptr<http::HttpIf> httpIf;
     std::shared_ptr<tts::TextToVoiceIf> ttsIf;
+    std::shared_ptr<logging::LogIf> logIf;
     std::future<void> ttsasync;
 
     std::string str(auto num)
@@ -453,131 +460,132 @@ struct Robothandler::Handler
     }
 };
 
-Robothandler::Robothandler(std::shared_ptr<http::HttpIf> httpIf,
-                           std::shared_ptr<tts::TextToVoiceIf> ttsIf) :
-    handler{std::make_unique<Handler>(httpIf, ttsIf)}
+Robot::Robot(std::shared_ptr<http::HttpIf> httpIf,
+             std::shared_ptr<tts::TextToVoiceIf> ttsIf,
+             std::shared_ptr<logging::LogIf> logIf) :
+    handler{std::make_unique<Handler>(httpIf, ttsIf, logIf)}
 {}
 
-Robothandler::~Robothandler() = default;
+Robot::~Robot() = default;
 
-std::string Robothandler::conninfo()
+std::string Robot::conninfo()
 {
     return handler->getconninfo();
 }
 
-void Robothandler::readwifiinfo()
+void Robot::readwifiinfo()
 {
-    std::cout << handler->getwifiinfo();
+    handler->log(handler->getwifiinfo());
 }
 
-void Robothandler::readservosinfo()
+void Robot::readservosinfo()
 {
-    std::cout << handler->getservosinfo();
+    handler->log(handler->getservosinfo());
 }
 
-void Robothandler::openeoat()
+void Robot::openeoat()
 {
     handler->openeoat();
 }
 
-void Robothandler::closeeoat()
+void Robot::closeeoat()
 {
     handler->closeeoat();
 }
 
-void Robothandler::readdeviceinfo()
+void Robot::readdeviceinfo()
 {
-    std::cout << handler->getdeviceinfo();
+    handler->log(handler->getdeviceinfo());
 }
 
-void Robothandler::settorqueunlocked()
+void Robot::settorqueunlocked()
 {
     handler->settorqueunlocked();
 }
 
-void Robothandler::settorquelocked()
+void Robot::settorquelocked()
 {
     handler->settorquelocked();
 }
 
-void Robothandler::setledon(uint8_t lvl)
+void Robot::setledon(uint8_t lvl)
 {
     handler->setledon(lvl);
 }
 
-void Robothandler::setledoff()
+void Robot::setledoff()
 {
     handler->setledoff();
 }
 
-void Robothandler::movebase()
+void Robot::movebase()
 {
     handler->movebase();
 }
 
-void Robothandler::moveleft()
+void Robot::moveleft()
 {
     handler->moveleft();
 }
 
-void Robothandler::moveright()
+void Robot::moveright()
 {
     handler->moveright();
 }
 
-void Robothandler::shakehand()
+void Robot::shakehand()
 {
     handler->shakehand();
 }
 
-void Robothandler::dance()
+void Robot::dance()
 {
     handler->dance();
 }
 
-void Robothandler::moveparked()
+void Robot::moveparked()
 {
     handler->moveparked();
 }
 
-void Robothandler::enlight()
+void Robot::enlight()
 {
     handler->enlight();
 }
 
-void Robothandler::engage()
+void Robot::engage()
 {
     handler->engage();
 }
 
-void Robothandler::disengage()
+void Robot::disengage()
 {
     handler->disengage();
 }
 
-void Robothandler::sendusercmd()
+void Robot::sendusercmd()
 {
     handler->sendusercmd();
 }
 
-void Robothandler::changevoice()
+void Robot::changevoice()
 {
     handler->changevoice();
 }
 
-void Robothandler::changelangtopolish()
+void Robot::changelangtopolish()
 {
     handler->changelangtopolish();
 }
 
-void Robothandler::changelangtoenglish()
+void Robot::changelangtoenglish()
 {
     handler->changelangtoenglish();
 }
 
-void Robothandler::changelangtogerman()
+void Robot::changelangtogerman()
 {
     handler->changelangtogerman();
 }
 
-} // namespace robot
+} // namespace robot::roarmm2
