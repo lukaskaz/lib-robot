@@ -42,7 +42,7 @@ jobs:
       run: |
         mkdir build && cd build && cmake .. && make
     - name: Executing program
-      run: build/roarm --help
+      run: build/robot --help
 
   test:
     name: Test [WIP]

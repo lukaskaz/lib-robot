@@ -73,6 +73,7 @@ link_directories(${build_dir}/build)
 
 set(source_dir "${CMAKE_BINARY_DIR}/libtts-src")
 set(build_dir "${CMAKE_BINARY_DIR}/libtts-build")
+set(vcpkg_dir "${CMAKE_BINARY_DIR}/libtts-build/build/vcpkg_installed")
 
 EXTERNALPROJECT_ADD(
   libtts
@@ -84,7 +85,7 @@ EXTERNALPROJECT_ADD(
   BINARY_DIR        ${build_dir}
   CONFIGURE_COMMAND mkdir /${build_dir}/build &> /dev/null
   BUILD_COMMAND     cd ${build_dir}/build &&
-    cmake -DBUILD_SHARED_LIBS=ON ${source_dir} && make
+                    cmake -DBUILD_SHARED_LIBS=ON ${source_dir} && make
   UPDATE_COMMAND    ""
   INSTALL_COMMAND   "" 
   TEST_COMMAND      ""
@@ -92,6 +93,7 @@ EXTERNALPROJECT_ADD(
 
 include_directories(${source_dir}/inc)
 link_directories(${build_dir}/build)
+link_directories(${vcpkg_dir}/lib)
 
 set(source_dir "${CMAKE_BINARY_DIR}/libshellcmd-src")
 set(build_dir "${CMAKE_BINARY_DIR}/libshellcmd-build")

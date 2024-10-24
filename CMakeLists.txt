@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 
 set(CMAKE_CXX_STANDARD 20)
 
-project(roarm)
+project(robot)
 
 include(cmake/dependencies.cmake)
 include(cmake/flags.cmake)
@@ -20,16 +20,17 @@ file(GLOB SOURCES "src/*.cpp")
 add_executable(${PROJECT_NAME} ${SOURCES})
 add_dependencies(${PROJECT_NAME} libclimenu)
 add_dependencies(${PROJECT_NAME} libnlohmann)
-add_dependencies(${PROJECT_NAME} libhttp)
 add_dependencies(${PROJECT_NAME} libtts)
+add_dependencies(${PROJECT_NAME} libhttp)
 add_dependencies(${PROJECT_NAME} libshellcmd)
 add_dependencies(${PROJECT_NAME} liblogger)
 
 target_link_libraries(${PROJECT_NAME}
     climenu
-    http
     tts
+    http
     shellcmd
     logger
     ${Boost_LIBRARIES}
 )
+

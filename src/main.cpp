@@ -1,7 +1,7 @@
 #include "display.hpp"
 #include "http/interfaces/cpr.hpp"
-#include "log/interfaces/collection.hpp"
 #include "log/interfaces/console.hpp"
+#include "log/interfaces/group.hpp"
 #include "log/interfaces/storage.hpp"
 #include "robot/interfaces/roarmm2.hpp"
 #include "tts/interfaces/googlecloud.hpp"
@@ -57,12 +57,12 @@ int main(int argc, char* argv[])
             logging::LogFactory::create<logging::console::Log>(lvl);
         auto logstorage =
             logging::LogFactory::create<logging::storage::Log>(lvl);
-        auto logIf = logging::LogFactory::create<logging::collection::Log>(
+        auto logIf = logging::LogFactory::create<logging::group::Log>(
             {logconsole, logstorage});
         auto httpIf = http::HttpFactory::create<http::cpr::Http>();
         auto ttsIf =
-            tts::TextToVoiceFactory<tts::googlecloud::TextToVoice>::create(
-                tts::voice_t(tts::language::polish, tts::gender::female, 1));
+            tts::TextToVoiceFactory::create<tts::googlecloud::TextToVoice>(
+                {tts::language::polish, tts::gender::female, 1});
         auto robotIf = robot::RobotFactory::create<robot::roarmm2::Robot>(
             httpIf, ttsIf, logIf);
         auto menu = display::Display(robotIf);

@@ -356,7 +356,10 @@ struct Robot::Handler
 
     void log(const std::string& msg)
     {
-        logIf->log(logging::type::info, msg);
+        if (logIf)
+        {
+            logIf->log(logging::type::info, msg);
+        }
     }
 
   private:
