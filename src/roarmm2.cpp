@@ -3,8 +3,7 @@
 #include "climenu.hpp"
 #include "robot/ttstexts.hpp"
 
-#include <nlohmann/json.hpp>
-
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <future>
@@ -15,8 +14,25 @@
 namespace robot::roarmm2
 {
 
-using json = nlohmann::json;
 using xyzt_t = std::tuple<int32_t, int32_t, int32_t, double>;
+
+struct HttoOutputVisitor
+{
+    auto operator()([[maybe_unused]] const std::monostate& arg) -> std::string
+    {
+        return {};
+    }
+
+    auto operator()(const std::string& arg) -> std::string
+    {
+        return arg;
+    }
+
+    auto operator()(const auto& arg) -> std::string
+    {
+        return std::to_string(arg);
+    }
+};
 
 struct Robot::Handler
 {
@@ -54,70 +70,99 @@ struct Robot::Handler
 
     void movebase()
     {
-        sendcommand(R"({"T":100})");
+        sendcommand({{"T", 100}});
         speak(task::ready);
     }
 
     void moveleft()
     {
-        sendcommand(R"({"T":121,"joint":1,"angle":45,"spd":10,"acc":10})");
+        sendcommand({{"T", 121},
+                     {"joint", 1},
+                     {"angle", 45},
+                     {"spd", 10},
+                     {"acc", 10}});
     }
 
     void moveright()
     {
-        sendcommand(R"({"T":121,"joint":1,"angle":-45,"spd":10,"acc":10})");
+        sendcommand({{"T", 121},
+                     {"joint", 1},
+                     {"angle", -45},
+                     {"spd", 10},
+                     {"acc", 10}});
     }
 
     void moveparked()
     {
-        const auto cmd = setposcmd({80, 0, 455, dgrtorad(180 - 35)});
-        sendcommand(cmd);
+        sendcommand(setposcmd({80, 0, 455, dgrtorad(180 - 35)}));
     }
 
     void settorqueunlocked()
     {
-        sendcommand(R"({"T":210,"cmd":0})");
+        sendcommand({{"T", 210}, {"cmd", 0}});
     }
 
     void settorquelocked()
     {
-        sendcommand(R"({"T":210,"cmd":1})");
+        sendcommand({{"T", 210}, {"cmd", 1}});
     }
 
     void setledon(uint8_t lvl)
     {
-        const auto cmd = R"({"T":114,"led":)" + std::to_string(lvl) + "}";
-        sendcommand(cmd);
+        sendcommand({{"T", 114}, {"led", str(lvl)}});
     }
 
     void setledoff()
     {
-        sendcommand(R"({"T":114,"led":0})");
+        sendcommand({{"T", 114}, {"led", 0}});
     }
 
     std::string getwifiinfo()
     {
-        return sendcommand(R"({"T":405})");
+        http::outputtype output;
+        if (sendcommand({{"T", 405}}, output))
+        {
+            return getstrfromhttp(output);
+        }
+        return {};
     }
 
     std::string getservosinfo()
     {
-        return sendcommand(R"({"T":105})");
+        http::outputtype output;
+        if (sendcommand({{"T", 105}}, output))
+        {
+            return getstrfromhttp(output);
+        }
+        return {};
     }
 
     void openeoat()
     {
-        sendcommand(R"({"T":121,"joint":4,"angle":135,"spd":50,"acc":10})");
+        sendcommand({{"T", 121},
+                     {"joint", 4},
+                     {"angle", 135},
+                     {"spd", 50},
+                     {"acc", 10}});
     }
 
     void closeeoat()
     {
-        sendcommand(R"({"T":121,"joint":4,"angle":180,"spd":50,"acc":10})");
+        sendcommand({{"T", 121},
+                     {"joint", 4},
+                     {"angle", 180},
+                     {"spd", 50},
+                     {"acc", 10}});
     }
 
     std::string getdeviceinfo()
     {
-        return sendcommand(R"({"T":302})");
+        http::outputtype output;
+        if (sendcommand({{"T", 302}}, output))
+        {
+            return getstrfromhttp(output);
+        }
+        return {};
     }
 
     void shakehand()
@@ -272,12 +317,11 @@ struct Robot::Handler
             {
                 try
                 {
-                    auto json = json::parse(usercmd);
-                    std::cout << sendcommand(json.dump()) << "\n";
+                    log("\n" + sendcommand(usercmd));
                 }
-                catch (const json::parse_error& e)
+                catch (const std::exception& e)
                 {
-                    std::cerr << "Cannot covert string to json\n";
+                    std::cerr << "Given json is invalid: " << e.what() << "\n";
                 }
             }
             else
@@ -373,19 +417,22 @@ struct Robot::Handler
         return std::to_string(num);
     }
 
-    std::string setposcmd(const xyzt_t& pos, double spd)
+    http::inputtype setposcmd(const xyzt_t& pos, double spd)
     {
         const auto [x, y, z, t] = pos;
-        return R"({"T":104,"x":)" + str(x) + R"(,"y":)" + str(y) + R"(,"z":)" +
-               str(z) + R"(,"t":)" + str(t) + R"(,"spd":)" + str(spd) + "}";
+        return {{"T", 104},    {"x", str(x)}, {"y", str(y)},
+                {"z", str(z)}, {"t", str(t)}, {"spd", str(spd)}};
     };
 
-    std::string setposcmd(const xyzt_t& pos)
+    http::inputtype setposcmd(const xyzt_t& pos)
     {
         const auto [x, y, z, t] = pos;
-        return R"({"T":1041,"x":)" + str(x) + R"(,"y":)" + str(y) + R"(,"z":)" +
-               str(z) + R"(,"t":)" + str(t) + "}";
-    };
+        return {{"T", 1041},
+                {"x", str(x)},
+                {"y", str(y)},
+                {"z", str(z)},
+                {"t", str(t)}};
+    }
 
     constexpr double radtodgr(double rad)
     {
@@ -399,14 +446,19 @@ struct Robot::Handler
 
     std::tuple<double, double, double> getxyz()
     {
-        auto json{json::parse(sendcommand(R"({"T":105})"))};
-        return {json[0]["x"], json[0]["y"], json[0]["z"]};
+
+        http::outputtype ret;
+        sendcommand({{"T", 105}}, ret);
+        return {std::get<double>(ret.at("x")), std::get<double>(ret.at("y")),
+                std::get<double>(ret.at("z"))};
     }
 
     int32_t geteoatangle()
     {
-        auto json{json::parse(sendcommand(R"({"T":105})"))};
-        return (int32_t)radtodgr(json[0]["t"]);
+        http::outputtype ret;
+        sendcommand({{"T", 105}}, ret);
+        auto angle = (int32_t)radtodgr(std::get<double>(ret.at("t")));
+        return angle;
     }
 
     void movetopos(xyzt_t pos)
@@ -437,9 +489,17 @@ struct Robot::Handler
         movetopos({175, 235, 325, dgrtorad(180 - 35)}, 100);
     }
 
-    std::string sendcommand(const std::string& cmd)
+    bool sendcommand(const http::inputtype& in, http::outputtype& out)
     {
-        return httpIf->get(cmd);
+        return httpIf->get(in, out);
+    }
+
+    template <typename In = http::inputtype>
+    std::string sendcommand(const In& in)
+    {
+        std::string resp;
+        httpIf->get(in, resp);
+        return resp;
     }
 
     void speak(task what)
@@ -461,6 +521,16 @@ struct Robot::Handler
             ttsasync.wait();
         }
     }
+
+    std::string getstrfromhttp(const http::outputtype& out)
+    {
+        std::string str;
+        std::ranges::for_each(out, [&str](const auto& item) {
+            str += item.first + " : " +
+                   std::visit(HttoOutputVisitor(), item.second) + "\n";
+        });
+        return str;
+    }
 };
 
 Robot::Robot(std::shared_ptr<http::HttpIf> httpIf,
@@ -478,12 +548,12 @@ std::string Robot::conninfo()
 
 void Robot::readwifiinfo()
 {
-    handler->log(handler->getwifiinfo());
+    handler->log("\n" + handler->getwifiinfo());
 }
 
 void Robot::readservosinfo()
 {
-    handler->log(handler->getservosinfo());
+    handler->log("\n" + handler->getservosinfo());
 }
 
 void Robot::openeoat()
@@ -498,7 +568,7 @@ void Robot::closeeoat()
 
 void Robot::readdeviceinfo()
 {
-    handler->log(handler->getdeviceinfo());
+    handler->log("\n" + handler->getdeviceinfo());
 }
 
 void Robot::settorqueunlocked()

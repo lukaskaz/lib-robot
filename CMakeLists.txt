@@ -19,7 +19,6 @@ file(GLOB SOURCES "src/*.cpp")
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 add_dependencies(${PROJECT_NAME} libclimenu)
-add_dependencies(${PROJECT_NAME} libnlohmann)
 add_dependencies(${PROJECT_NAME} libtts)
 add_dependencies(${PROJECT_NAME} libhttp)
 add_dependencies(${PROJECT_NAME} libshellcmd)
