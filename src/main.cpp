@@ -59,7 +59,7 @@ int main(int argc, char* argv[])
             logging::LogFactory::create<logging::storage::Log>(lvl);
         auto logIf = logging::LogFactory::create<logging::group::Log>(
             {logconsole, logstorage});
-        auto httpIf = http::HttpFactory::create<http::cpr::Http>();
+        auto httpIf = http::HttpFactory::create<http::cpr::Http>(logIf);
         auto ttsIf =
             tts::TextToVoiceFactory::create<tts::googlecloud::TextToVoice>(
                 {tts::language::polish, tts::gender::female, 1});
