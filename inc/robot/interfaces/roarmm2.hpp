@@ -13,31 +13,31 @@ class Robot : public RobotIf
   public:
     ~Robot();
 
-    void readwifiinfo() override;
-    void readservosinfo() override;
-    void settorqueunlocked() override;
-    void settorquelocked() override;
-    void openeoat() override;
-    void closeeoat() override;
-    void readdeviceinfo() override;
-    void setledon(uint8_t lvl) override;
-    void setledoff() override;
-    void movebase() override;
-    void moveleft() override;
-    void moveright() override;
-    void moveparked() override;
-    void sendusercmd() override;
+    bool readwifiinfo(bool) override;
+    bool readservosinfo(bool) override;
+    bool settorqueunlocked(bool) override;
+    bool settorquelocked(bool) override;
+    bool openeoat(bool) override;
+    bool closeeoat(bool) override;
+    bool readdeviceinfo(bool) override;
+    bool setledon(bool, uint8_t lvl) override;
+    bool setledoff(bool) override;
+    bool movebase(bool) override;
+    bool moveleft(bool) override;
+    bool moveright(bool) override;
+    bool moveparked(bool) override;
+    bool sendusercmd(bool) override;
 
-    void shakehand() override;
-    void dance() override;
-    void enlight() override;
-    void engage() override;
-    void disengage() override;
+    bool shakehand(bool) override;
+    bool dance(bool) override;
+    bool enlight(bool) override;
+    bool engage() override;
+    bool disengage() override;
 
-    void changevoice() override;
-    void changelangtopolish() override;
-    void changelangtoenglish() override;
-    void changelangtogerman() override;
+    bool changevoice(bool) override;
+    bool changelangtopolish(bool) override;
+    bool changelangtoenglish(bool) override;
+    bool changelangtogerman(bool) override;
 
     std::string conninfo() override;
 

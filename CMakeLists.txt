@@ -18,14 +18,14 @@ include_directories(inc)
 file(GLOB SOURCES "src/*.cpp")
 
 add_executable(${PROJECT_NAME} ${SOURCES})
-add_dependencies(${PROJECT_NAME} libclimenu)
+add_dependencies(${PROJECT_NAME} libmenu)
 add_dependencies(${PROJECT_NAME} libtts)
 add_dependencies(${PROJECT_NAME} libhttp)
 add_dependencies(${PROJECT_NAME} libshellcmd)
 add_dependencies(${PROJECT_NAME} liblogger)
 
 target_link_libraries(${PROJECT_NAME}
-    climenu
+    menu
     tts
     http
     shellcmd

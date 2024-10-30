@@ -1,6 +1,6 @@
 #include "display.hpp"
 
-#include "climenu.hpp"
+#include "menu/interfaces/cli.hpp"
 #include "robot/helpers.hpp"
 
 #include <functional>
@@ -12,7 +12,10 @@ namespace display
 struct Display::Handler
 {
   public:
-    Handler(std::shared_ptr<robot::RobotIf> robotIf) : robotIf{robotIf}
+    Handler(std::shared_ptr<logging::LogIf> logIf,
+            std::shared_ptr<robot::RobotIf> robotIf) :
+        logIf{logIf},
+        robotIf{robotIf}
     {
         robotIf->engage();
     }
@@ -21,54 +24,88 @@ struct Display::Handler
         robotIf->disengage();
     }
 
-    void exitprogram()
-    {}
+    bool exitprogram()
+    {
+        return false;
+    }
 
     void showmenu()
     {
-        Menu menu{
+        auto menu = menu::MenuFactory::create<menu::cli::Menu>(
+            logIf,
             "[JSON commands via " + robotIf->conninfo() + " on " +
                 robothelpers::gettimestr() + "]",
             {{"get wifi info",
-              std::bind(&robot::RobotIf::readwifiinfo, robotIf)},
+              std::bind(&robot::RobotIf::readwifiinfo, robotIf, true),
+              std::bind(&robot::RobotIf::readwifiinfo, robotIf, false)},
              {"get device info",
-              std::bind(&robot::RobotIf::readdeviceinfo, robotIf)},
+              std::bind(&robot::RobotIf::readdeviceinfo, robotIf, true),
+              std::bind(&robot::RobotIf::readdeviceinfo, robotIf, false)},
              {"get servos position",
-              std::bind(&robot::RobotIf::readservosinfo, robotIf)},
+              std::bind(&robot::RobotIf::readservosinfo, robotIf, true),
+              std::bind(&robot::RobotIf::readservosinfo, robotIf, false)},
              {"unlock torque",
-              std::bind(&robot::RobotIf::settorqueunlocked, robotIf)},
+              std::bind(&robot::RobotIf::settorqueunlocked, robotIf, true),
+              std::bind(&robot::RobotIf::settorqueunlocked, robotIf, false)},
              {"lock torque",
-              std::bind(&robot::RobotIf::settorquelocked, robotIf)},
-             {"open clamp", std::bind(&robot::RobotIf::openeoat, robotIf)},
-             {"close clamp", std::bind(&robot::RobotIf::closeeoat, robotIf)},
-             {"shake hand", std::bind(&robot::RobotIf::shakehand, robotIf)},
-             {"dance", std::bind(&robot::RobotIf::dance, robotIf)},
-             {"enlight", std::bind(&robot::RobotIf::enlight, robotIf)},
-             {"move base", std::bind(&robot::RobotIf::movebase, robotIf)},
-             {"move left", std::bind(&robot::RobotIf::moveleft, robotIf)},
-             {"move right", std::bind(&robot::RobotIf::moveright, robotIf)},
-             {"move parked", std::bind(&robot::RobotIf::moveparked, robotIf)},
-             {"set led on", std::bind(&robot::RobotIf::setledon, robotIf, 255)},
-             {"set led off", std::bind(&robot::RobotIf::setledoff, robotIf)},
+              std::bind(&robot::RobotIf::settorquelocked, robotIf, true),
+              std::bind(&robot::RobotIf::settorquelocked, robotIf, false)},
+             {"open clamp", std::bind(&robot::RobotIf::openeoat, robotIf, true),
+              std::bind(&robot::RobotIf::openeoat, robotIf, false)},
+             {"close clamp",
+              std::bind(&robot::RobotIf::closeeoat, robotIf, true),
+              std::bind(&robot::RobotIf::closeeoat, robotIf, false)},
+             {"shake hand",
+              std::bind(&robot::RobotIf::shakehand, robotIf, true),
+              std::bind(&robot::RobotIf::shakehand, robotIf, false)},
+             {"dance", std::bind(&robot::RobotIf::dance, robotIf, true),
+              std::bind(&robot::RobotIf::dance, robotIf, false)},
+             {"enlight", std::bind(&robot::RobotIf::enlight, robotIf, true),
+              std::bind(&robot::RobotIf::enlight, robotIf, false)},
+             {"move base", std::bind(&robot::RobotIf::movebase, robotIf, true),
+              std::bind(&robot::RobotIf::movebase, robotIf, false)},
+             {"move left", std::bind(&robot::RobotIf::moveleft, robotIf, true),
+              std::bind(&robot::RobotIf::moveleft, robotIf, false)},
+             {"move right",
+              std::bind(&robot::RobotIf::moveright, robotIf, true),
+              std::bind(&robot::RobotIf::moveright, robotIf, false)},
+             {"move parked",
+              std::bind(&robot::RobotIf::moveparked, robotIf, true),
+              std::bind(&robot::RobotIf::moveparked, robotIf, false)},
+             {"set led on",
+              std::bind(&robot::RobotIf::setledon, robotIf, true, 255),
+              std::bind(&robot::RobotIf::setledon, robotIf, false, 255)},
+             {"set led off",
+              std::bind(&robot::RobotIf::setledoff, robotIf, true),
+              std::bind(&robot::RobotIf::setledoff, robotIf, false)},
              {"send user command",
-              std::bind(&robot::RobotIf::sendusercmd, robotIf)},
-             {"change voice", std::bind(&robot::RobotIf::changevoice, robotIf)},
+              std::bind(&robot::RobotIf::sendusercmd, robotIf, true),
+              std::bind(&robot::RobotIf::sendusercmd, robotIf, false)},
+             {"change voice",
+              std::bind(&robot::RobotIf::changevoice, robotIf, true),
+              std::bind(&robot::RobotIf::changevoice, robotIf, false)},
              {"change language to polish",
-              std::bind(&robot::RobotIf::changelangtopolish, robotIf)},
+              std::bind(&robot::RobotIf::changelangtopolish, robotIf, true),
+              std::bind(&robot::RobotIf::changelangtopolish, robotIf, false)},
              {"change language to english",
-              std::bind(&robot::RobotIf::changelangtoenglish, robotIf)},
+              std::bind(&robot::RobotIf::changelangtoenglish, robotIf, true),
+              std::bind(&robot::RobotIf::changelangtoenglish, robotIf, false)},
              {"change language to german",
-              std::bind(&robot::RobotIf::changelangtogerman, robotIf)},
-             {"exit program", [this]() { exitprogram(); }}}};
-        menu.run();
+              std::bind(&robot::RobotIf::changelangtogerman, robotIf, true),
+              std::bind(&robot::RobotIf::changelangtogerman, robotIf, false)},
+             {"exit program", [this]() { return exitprogram(); },
+              [this]() { return exitprogram(); }}});
+        menu->run();
     }
 
   public:
+    std::shared_ptr<logging::LogIf> logIf;
     std::shared_ptr<robot::RobotIf> robotIf;
 };
 
-Display::Display(std::shared_ptr<robot::RobotIf> robotIf) :
-    handler{std::make_unique<Handler>(robotIf)}
+Display::Display(std::shared_ptr<logging::LogIf> logIf,
+                 std::shared_ptr<robot::RobotIf> robotIf) :
+    handler{std::make_unique<Handler>(logIf, robotIf)}
 {}
 
 Display::~Display() = default;

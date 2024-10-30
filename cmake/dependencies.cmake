@@ -6,15 +6,15 @@ include(ExternalProject)
 include_directories(${source_dir}/inc)
 link_directories(${build_dir}/build)
 
-set(source_dir "${CMAKE_BINARY_DIR}/libclimenu-src")
-set(build_dir "${CMAKE_BINARY_DIR}/libclimenu-build")
+set(source_dir "${CMAKE_BINARY_DIR}/libmenu-src")
+set(build_dir "${CMAKE_BINARY_DIR}/libmenu-build")
 
 EXTERNALPROJECT_ADD(
-  libclimenu
-  GIT_REPOSITORY    https://github.com/lukaskaz/lib-climenu.git
+  libmenu
+  GIT_REPOSITORY    https://github.com/lukaskaz/lib-menu.git
   GIT_TAG           main
   PATCH_COMMAND     ${patching_cmd}
-  PREFIX            libclimenu-workspace
+  PREFIX            libmenu-workspace
   SOURCE_DIR        ${source_dir}
   BINARY_DIR        ${build_dir}
   CONFIGURE_COMMAND mkdir /${build_dir}/build &> /dev/null
