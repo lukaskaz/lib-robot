@@ -1,6 +1,6 @@
 #include "robot/interfaces/roarmm2.hpp"
 
-#include "climenu.hpp"
+#include "menu/interfaces/cli.hpp"
 #include "robot/ttstexts.hpp"
 
 #include <algorithm>
@@ -47,6 +47,11 @@ struct Robot::Handler
         {
             throw std::runtime_error("No interface to connect to robot");
         }
+    }
+
+    bool isenterpressed()
+    {
+        return menu::cli::Menu::isenterpressed();
     }
 
     std::string getconninfo()
@@ -110,11 +115,14 @@ struct Robot::Handler
     void setledon(uint8_t lvl)
     {
         sendcommand({{"T", 114}, {"led", str(lvl)}});
+        ledstatus = true;
     }
 
     void setledoff()
     {
         sendcommand({{"T", 114}, {"led", 0}});
+
+        ledstatus = false;
     }
 
     std::string getwifiinfo()
@@ -172,7 +180,7 @@ struct Robot::Handler
         usleep(2 * 1000 * 1000);
 
         auto initpos = getxyz();
-        while (!Menu::isenterpressed())
+        while (!isenterpressed())
         {
             if (initpos != getxyz())
             {
@@ -244,7 +252,7 @@ struct Robot::Handler
         std::mt19937 generator(seed);
         std::uniform_int_distribution<uint32_t> rand(0, dancestates.size() - 1);
 
-        while (!Menu::isenterpressed())
+        while (!isenterpressed())
         {
             static uint32_t prevpos{UINT32_MAX};
             uint32_t pos{};
@@ -278,7 +286,7 @@ struct Robot::Handler
             speak(task::enlightbreak);
         });
 
-        while (!Menu::isenterpressed())
+        while (!isenterpressed())
         {
             usleep(100 * 1000);
         }
@@ -309,15 +317,12 @@ struct Robot::Handler
         {
             std::cout << "CMD> ";
             std::string usercmd;
-            std::cin >> usercmd;
-            std::cin.clear();
-            std::cin.ignore(INT_MAX, '\n');
-
+            std::getline(std::cin, usercmd);
             if (usercmd != exitTag)
             {
                 try
                 {
-                    log("\n" + sendcommand(usercmd));
+                    log(logging::type::info, sendcommand(usercmd));
                 }
                 catch (const std::exception& e)
                 {
@@ -398,19 +403,38 @@ struct Robot::Handler
         }
     }
 
-    void log(const std::string& msg)
+    void log(logging::type type, const std::string& msg)
     {
         if (logIf)
         {
-            logIf->log(logging::type::info, msg);
+            logIf->log(type, module, msg);
         }
     }
 
+    tts::language getlanguage()
+    {
+        auto voice = ttsIf->getvoice();
+        return std::get<0>(voice);
+    }
+
+    bool iseaotopened()
+    {
+        auto angle = geteoatangle();
+        return angle < 140;
+    }
+
+    bool isledon()
+    {
+        return ledstatus;
+    }
+
   private:
+    std::string module{"librobot"};
     std::shared_ptr<http::HttpIf> httpIf;
     std::shared_ptr<tts::TextToVoiceIf> ttsIf;
     std::shared_ptr<logging::LogIf> logIf;
     std::future<void> ttsasync;
+    bool ledstatus{};
 
     std::string str(auto num)
     {
@@ -546,119 +570,188 @@ std::string Robot::conninfo()
     return handler->getconninfo();
 }
 
-void Robot::readwifiinfo()
+bool Robot::readwifiinfo(bool isshown)
 {
-    handler->log("\n" + handler->getwifiinfo());
+    if (isshown)
+        return true;
+    handler->log(logging::type::info, handler->getwifiinfo());
+    return true;
 }
 
-void Robot::readservosinfo()
+bool Robot::readservosinfo(bool isshown)
 {
-    handler->log("\n" + handler->getservosinfo());
+    if (isshown)
+        return true;
+    handler->log(logging::type::info, handler->getservosinfo());
+    return true;
 }
 
-void Robot::openeoat()
+bool Robot::openeoat(bool isshown)
 {
+    if (isshown)
+        return !handler->iseaotopened();
     handler->openeoat();
+    while (!handler->iseaotopened())
+        sleep(1);
+    return false;
 }
 
-void Robot::closeeoat()
+bool Robot::closeeoat(bool isshown)
 {
+    if (isshown)
+        return handler->iseaotopened();
     handler->closeeoat();
+    while (handler->iseaotopened())
+        sleep(1);
+    return false;
 }
 
-void Robot::readdeviceinfo()
+bool Robot::readdeviceinfo(bool isshown)
 {
-    handler->log("\n" + handler->getdeviceinfo());
+    if (isshown)
+        return true;
+    handler->log(logging::type::info, handler->getdeviceinfo());
+    return true;
 }
 
-void Robot::settorqueunlocked()
+bool Robot::settorqueunlocked(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->settorqueunlocked();
+    return false;
 }
 
-void Robot::settorquelocked()
+bool Robot::settorquelocked(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->settorquelocked();
+    return false;
 }
 
-void Robot::setledon(uint8_t lvl)
+bool Robot::setledon(bool isshown, uint8_t lvl)
 {
+    if (isshown)
+        return !handler->isledon();
     handler->setledon(lvl);
+    return false;
 }
 
-void Robot::setledoff()
+bool Robot::setledoff(bool isshown)
 {
+    if (isshown)
+        return handler->isledon();
     handler->setledoff();
+    return false;
 }
 
-void Robot::movebase()
+bool Robot::movebase(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->movebase();
+    return false;
 }
 
-void Robot::moveleft()
+bool Robot::moveleft(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->moveleft();
+    return false;
 }
 
-void Robot::moveright()
+bool Robot::moveright(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->moveright();
+    return false;
 }
 
-void Robot::shakehand()
+bool Robot::shakehand(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->shakehand();
+    return false;
 }
 
-void Robot::dance()
+bool Robot::dance(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->dance();
+    return false;
 }
 
-void Robot::moveparked()
+bool Robot::moveparked(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->moveparked();
+    return false;
 }
 
-void Robot::enlight()
+bool Robot::enlight(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->enlight();
+    return false;
 }
 
-void Robot::engage()
+bool Robot::engage()
 {
     handler->engage();
+    return true;
 }
 
-void Robot::disengage()
+bool Robot::disengage()
 {
     handler->disengage();
+    return true;
 }
 
-void Robot::sendusercmd()
+bool Robot::sendusercmd(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->sendusercmd();
+    return true;
 }
 
-void Robot::changevoice()
+bool Robot::changevoice(bool isshown)
 {
+    if (isshown)
+        return true;
     handler->changevoice();
+    return false;
 }
 
-void Robot::changelangtopolish()
+bool Robot::changelangtopolish(bool isshown)
 {
+    if (isshown)
+        return handler->getlanguage() != tts::language::polish;
     handler->changelangtopolish();
+    return false;
 }
 
-void Robot::changelangtoenglish()
+bool Robot::changelangtoenglish(bool isshown)
 {
+    if (isshown)
+        return handler->getlanguage() != tts::language::english;
     handler->changelangtoenglish();
+    return false;
 }
 
-void Robot::changelangtogerman()
+bool Robot::changelangtogerman(bool isshown)
 {
+    if (isshown)
+        return handler->getlanguage() != tts::language::german;
     handler->changelangtogerman();
+    return false;
 }
 
 } // namespace robot::roarmm2

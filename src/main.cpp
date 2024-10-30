@@ -21,7 +21,7 @@ void signalHandler(int signal)
 
 int main(int argc, char* argv[])
 {
-    uint32_t loglvl = 1;
+    auto loglvl = (uint32_t)logging::type::info;
     std::signal(SIGINT, signalHandler);
     if (argc > 1)
         [argc, argv, &loglvl]() {
@@ -65,7 +65,7 @@ int main(int argc, char* argv[])
                 {tts::language::polish, tts::gender::female, 1});
         auto robotIf = robot::RobotFactory::create<robot::roarmm2::Robot>(
             httpIf, ttsIf, logIf);
-        auto menu = display::Display(robotIf);
+        auto menu = display::Display(logIf, robotIf);
         menu.run();
     }
     catch (const std::exception& ex)
