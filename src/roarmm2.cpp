@@ -14,8 +14,11 @@
 namespace robot::roarmm2
 {
 
-using xyzt_t = std::tuple<int32_t, int32_t, int32_t, double>;
+static constexpr int32_t posmargin = 1;
+static constexpr int32_t eoatclosedangle = 180;
 
+using xyzt_t = std::tuple<int32_t, int32_t, int32_t, double>;
+using xyz_t = std::tuple<int32_t, int32_t, int32_t>;
 struct HttoOutputVisitor
 {
     auto operator()([[maybe_unused]] const std::monostate& arg) -> std::string
@@ -114,7 +117,7 @@ struct Robot::Handler
 
     void setledon(uint8_t lvl)
     {
-        sendcommand({{"T", 114}, {"led", str(lvl)}});
+        sendcommand({{"T", 114}, {"led", lvl}});
         ledstatus = true;
     }
 
@@ -140,27 +143,99 @@ struct Robot::Handler
         http::outputtype output;
         if (sendcommand({{"T", 105}}, output))
         {
-            return getstrfromhttp(output);
+            auto eoatdgr = (int32_t)radtodgr(std::get<double>(output.at("t")));
+            return getstrfromhttp(output) + "t : " + std::to_string(eoatdgr);
         }
         return {};
     }
 
-    void openeoat()
+    bool seteoat(int32_t rawangle, int32_t& retangle)
     {
-        sendcommand({{"T", 121},
-                     {"joint", 4},
-                     {"angle", 135},
-                     {"spd", 50},
-                     {"acc", 10}});
+        struct Eoat
+        {
+            Eoat(Handler* handler, int32_t rawangle) :
+                handler{handler}, setpoint{convert(rawangle)},
+                currangle{handler->geteoatangle()}
+            {}
+
+            void move()
+            {
+                handler->sendcommand({{"T", 121},
+                                      {"joint", 4},
+                                      {"angle", setpoint},
+                                      {"spd", 50},
+                                      {"acc", 10}});
+                waitmoving();
+            }
+
+            bool isatposition() const
+            {
+                return handler->isposaccepted(currangle, setpoint);
+            }
+
+            int32_t getposition() const
+            {
+                return convert(currangle);
+            }
+
+          private:
+            const Handler* handler;
+            const int32_t setpoint;
+            const uint32_t maxrepeats{3};
+            int32_t currangle{}, prevangle{};
+            uint32_t repeats{};
+
+            void waitmoving()
+            {
+                while ((currangle = handler->geteoatangle()) != setpoint)
+                {
+                    if (currangle == prevangle)
+                    {
+                        if (handler->isposaccepted(currangle, setpoint))
+                        {
+                            handler->log(
+                                logging::type::debug,
+                                "Eaot not in setpoint, but within margin");
+                            break;
+                        }
+                        if (repeats++ == maxrepeats)
+                        {
+                            handler->log(logging::type::warning,
+                                         "Eaot cannot reach setpoint");
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        repeats = 0;
+                        prevangle = currangle;
+                    }
+                }
+            }
+
+            int32_t convert(int32_t angle) const
+            {
+                return eoatclosedangle - angle;
+            }
+        };
+
+        Eoat eoat{this, rawangle};
+        if (!eoat.isatposition())
+            eoat.move();
+        retangle = eoat.getposition();
+        return eoat.isatposition();
     }
 
-    void closeeoat()
+    bool openeoat()
     {
-        sendcommand({{"T", 121},
-                     {"joint", 4},
-                     {"angle", 180},
-                     {"spd", 50},
-                     {"acc", 10}});
+        [[maybe_unused]] int32_t retangle{};
+        return seteoat(45, retangle);
+    }
+
+    bool closeeoat()
+    {
+        [[maybe_unused]] int32_t retangle{};
+        return seteoat(0, retangle);
     }
 
     std::string getdeviceinfo()
@@ -184,10 +259,7 @@ struct Robot::Handler
         {
             if (initpos != getxyz())
             {
-                closeeoat();
-                usleep(800 * 1000);
-                constexpr int32_t eoatclosedangle{177};
-                if (geteoatangle() < eoatclosedangle)
+                if (!closeeoat())
                 {
                     speak(task::greetshake);
                     for (uint8_t cnt{}; cnt < 3; cnt++)
@@ -221,8 +293,7 @@ struct Robot::Handler
             while (singing)
             {
                 auto num = (cnt++) % phrases.size();
-                speak(phrases[num]);
-                usleep(250 * 1000);
+                speak(phrases[num], false);
             }
             speak(task::danceend);
         });
@@ -263,6 +334,7 @@ struct Robot::Handler
             usleep(1200 * 1000);
         }
         singing = false;
+        tts::TextToVoiceIf::kill();
         movedancebasepos();
         ledcall.wait();
         singingcall.wait();
@@ -403,7 +475,7 @@ struct Robot::Handler
         }
     }
 
-    void log(logging::type type, const std::string& msg)
+    void log(logging::type type, const std::string& msg) const
     {
         if (logIf)
         {
@@ -417,10 +489,9 @@ struct Robot::Handler
         return std::get<0>(voice);
     }
 
-    bool iseaotopened()
+    bool iseoatclosed()
     {
-        auto angle = geteoatangle();
-        return angle < 140;
+        return isposaccepted(geteoatangle(), eoatclosedangle);
     }
 
     bool isledon()
@@ -436,53 +507,53 @@ struct Robot::Handler
     std::future<void> ttsasync;
     bool ledstatus{};
 
-    std::string str(auto num)
-    {
-        return std::to_string(num);
-    }
-
     http::inputtype setposcmd(const xyzt_t& pos, double spd)
     {
         const auto [x, y, z, t] = pos;
-        return {{"T", 104},    {"x", str(x)}, {"y", str(y)},
-                {"z", str(z)}, {"t", str(t)}, {"spd", str(spd)}};
+        return {{"T", 104}, {"x", x}, {"y", y},
+                {"z", z},   {"t", t}, {"spd", spd}};
     };
 
     http::inputtype setposcmd(const xyzt_t& pos)
     {
         const auto [x, y, z, t] = pos;
-        return {{"T", 1041},
-                {"x", str(x)},
-                {"y", str(y)},
-                {"z", str(z)},
-                {"t", str(t)}};
+        return {{"T", 1041}, {"x", x}, {"y", y}, {"z", z}, {"t", t}};
     }
 
-    constexpr double radtodgr(double rad)
+    constexpr double radtodgr(double rad) const
     {
         return round(rad * 180. / M_PI);
     }
 
-    constexpr double dgrtorad(double dgr)
+    constexpr double dgrtorad(double dgr) const
     {
         return dgr * M_PI / 180.;
     }
 
-    std::tuple<double, double, double> getxyz()
+    xyzt_t getxyzt()
     {
-
         http::outputtype ret;
         sendcommand({{"T", 105}}, ret);
-        return {std::get<double>(ret.at("x")), std::get<double>(ret.at("y")),
-                std::get<double>(ret.at("z"))};
+        return {(int32_t)std::get<double>(ret.at("x")),
+                (int32_t)std::get<double>(ret.at("y")),
+                (int32_t)std::get<double>(ret.at("z")),
+                std::get<double>(ret.at("t"))};
     }
 
-    int32_t geteoatangle()
+    xyz_t getxyz()
     {
         http::outputtype ret;
         sendcommand({{"T", 105}}, ret);
-        auto angle = (int32_t)radtodgr(std::get<double>(ret.at("t")));
-        return angle;
+        return {(int32_t)std::get<double>(ret.at("x")),
+                (int32_t)std::get<double>(ret.at("y")),
+                (int32_t)std::get<double>(ret.at("z"))};
+    }
+
+    int32_t geteoatangle() const
+    {
+        http::outputtype ret;
+        sendcommand({{"T", 105}}, ret);
+        return (int32_t)radtodgr(std::get<double>(ret.at("t")));
     }
 
     void movetopos(xyzt_t pos)
@@ -513,28 +584,37 @@ struct Robot::Handler
         movetopos({175, 235, 325, dgrtorad(180 - 35)}, 100);
     }
 
-    bool sendcommand(const http::inputtype& in, http::outputtype& out)
+    bool sendcommand(const http::inputtype& in, http::outputtype& out) const
     {
         return httpIf->get(in, out);
     }
 
     template <typename In = http::inputtype>
-    std::string sendcommand(const In& in)
+    std::string sendcommand(const In& in) const
     {
         std::string resp;
         httpIf->get(in, resp);
         return resp;
     }
 
-    void speak(task what)
+    void speak(task what, bool async = true)
     {
         if (ttsIf)
         {
-            waitspeakdone();
-            ttsasync = std::async(std::launch::async, [this, what]() {
+            if (async)
+            {
+                waitspeakdone();
+                ttsasync = std::async(std::launch::async, [this, what]() {
+                    auto inlang = std::get<0>(ttsIf->getvoice());
+                    ttsIf->speak(getttstext(what, inlang));
+                });
+            }
+            else
+            {
+                waitspeakdone();
                 auto inlang = std::get<0>(ttsIf->getvoice());
                 ttsIf->speak(getttstext(what, inlang));
-            });
+            }
         }
     }
 
@@ -554,6 +634,11 @@ struct Robot::Handler
                    std::visit(HttoOutputVisitor(), item.second) + "\n";
         });
         return str;
+    }
+
+    bool isposaccepted(int32_t present, int32_t expected) const
+    {
+        return std::abs(present - expected) <= posmargin;
     }
 };
 
@@ -589,21 +674,15 @@ bool Robot::readservosinfo(bool isshown)
 bool Robot::openeoat(bool isshown)
 {
     if (isshown)
-        return !handler->iseaotopened();
-    handler->openeoat();
-    while (!handler->iseaotopened())
-        sleep(1);
-    return false;
+        return handler->iseoatclosed();
+    return !handler->openeoat();
 }
 
 bool Robot::closeeoat(bool isshown)
 {
     if (isshown)
-        return handler->iseaotopened();
-    handler->closeeoat();
-    while (handler->iseaotopened())
-        sleep(1);
-    return false;
+        return !handler->iseoatclosed();
+    return !handler->closeeoat();
 }
 
 bool Robot::readdeviceinfo(bool isshown)
