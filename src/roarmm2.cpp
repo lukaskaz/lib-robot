@@ -2,6 +2,7 @@
 
 #include "menu/interfaces/cli.hpp"
 #include "robot/ttstexts.hpp"
+#include "shellcommand.hpp"
 
 #include <algorithm>
 #include <array>
@@ -37,6 +38,8 @@ concept TupleType = requires(T t) {
     std::tuple_size<T>::value;
     std::get<0>(t);
 };
+
+using soundactiontype = std::function<void(std::atomic_bool&, bool)>;
 
 struct HttoOutputVisitor
 {
@@ -95,28 +98,29 @@ struct Robot::Handler
         settorquelocked();
     }
 
-    void movebase()
+    void movebase(bool inform = true)
     {
         sendcommand({{"T", 100}});
-        speak(task::ready);
+        if (inform)
+            speak(task::ready);
     }
 
     void moveleft()
     {
-        sendcommand({{"T", 121},
-                     {"joint", 1},
-                     {"angle", 45},
-                     {"spd", 10},
-                     {"acc", 10}});
+        movebase(false);
+        auto pos = getxyzt();
+        auto& axistomove = std::get<1>(pos);
+        axistomove += 200;
+        movetopos(pos, 1.f);
     }
 
     void moveright()
     {
-        sendcommand({{"T", 121},
-                     {"joint", 1},
-                     {"angle", -45},
-                     {"spd", 10},
-                     {"acc", 10}});
+        movebase(false);
+        auto pos = getxyzt();
+        auto& axistomove = std::get<1>(pos);
+        axistomove -= 200;
+        movetopos(pos, 1.f);
     }
 
     void moveparked()
@@ -161,7 +165,8 @@ struct Robot::Handler
         http::outputtype output;
         if (sendcommand({{"T", 105}}, output))
         {
-            auto eoatdgr = (int32_t)radtodgr(std::get<double>(output.at("t")));
+            auto eoatdgr = eoatanglebase -
+                           (int32_t)radtodgr(std::get<double>(output.at("t")));
             return getstrfromhttp(output) + "t : " + std::to_string(eoatdgr);
         }
         return {};
@@ -196,49 +201,40 @@ struct Robot::Handler
     void shakehand()
     {
         speak(task::greetstart);
-        movehandshakepos();
-        auto prevpos = movehandshakepos();
+        auto prevxyz = movehandshakepos();
         while (!isenterpressed())
         {
-            if (prevpos != getxyz())
+            if (prevxyz != getxyz())
             {
                 if (!closeeoat())
                 {
                     speak(task::greetshake);
                     dohandshake(3);
-                    movehandshakepos();
                     speak(task::greetend);
                     break;
                 }
                 speak(task::greetfail);
-                prevpos = movehandshakepos();
+                prevxyz = movehandshakepos();
             }
         }
+        movehandshakepos();
         movebase();
     }
 
-    void dance()
+    void dance(const soundactiontype& soundaction = [](const std::atomic_bool&,
+                                                       bool) {})
     {
-        std::atomic<bool> singing{true};
-        movedancebasepos();
-        speak(task::dancestart);
-        auto singingcall = std::async(std::launch::async, [this, &singing]() {
-            auto phrases =
-                std::to_array<task>({task::songlinefirst, task::songlinesecond,
-                                     task::songlinethird, task::songlineforth});
-            uint32_t cnt{};
-            while (singing)
+        std::atomic<bool> running{true};
+        auto lightaction = [this](std::atomic_bool& running, bool kill) {
+            if (kill)
             {
-                auto num = (cnt++) % phrases.size();
-                speak(phrases[num], false);
+                running = false;
+                return;
             }
-            speak(task::danceend, false);
-        });
 
-        auto ledcall = std::async(std::launch::async, [this, &singing]() {
             bool increase{true};
             int32_t level{}, step{5};
-            while (singing)
+            while (running)
             {
                 increase = level > 120 ? false : level < 10 ? true : increase;
                 level += increase ? step : -step;
@@ -246,34 +242,46 @@ struct Robot::Handler
                 usleep(1000);
             }
             setledoff();
-        });
+        };
 
-        auto dancestates = std::to_array<xyzt_t>({{-65, 145, 160, 65},
-                                                  {-140, 320, 355, 0},
-                                                  {65, 35, 95, 25},
-                                                  {60, 110, 455, 45},
-                                                  {12, 400, -75, 10}});
+        movedancebasepos();
+        speak(task::dancestart, false);
+        auto soundasync =
+            std::async(std::launch::async,
+                       std::bind(soundaction, std::ref(running), false));
+        auto lightasync =
+            std::async(std::launch::async,
+                       std::bind(lightaction, std::ref(running), false));
 
+        static constexpr auto danceposes =
+            std::to_array<xyzt_t>({{-65, 145, 160, 65},
+                                   {-140, 320, 355, 0},
+                                   {65, 35, 95, 25},
+                                   {60, 110, 455, 45},
+                                   {12, 400, -75, 10}});
         std::random_device os_seed;
         const uint32_t seed = os_seed();
         std::mt19937 generator(seed);
-        std::uniform_int_distribution<uint32_t> rand(0, dancestates.size() - 1);
+        std::uniform_int_distribution<uint32_t> rand(0, danceposes.size() - 1);
 
-        while (!isenterpressed())
+        while (true)
         {
-            static uint32_t prevpos{UINT32_MAX};
-            uint32_t pos{};
-            while ((pos = rand(generator)) == prevpos)
+            if (isenterpressed())
+            {
+                speak(task::danceend);
+                lightaction(running, true);
+                soundaction(running, true);
+                movedancebasepos();
+                lightasync.wait();
+                soundasync.wait();
+                break;
+            }
+            uint32_t curridx{}, previdx{UINT32_MAX};
+            while ((curridx = rand(generator)) == previdx)
                 ;
-            movetopos(dancestates[pos]);
-            prevpos = pos;
-            usleep(1200 * 1000);
+            movetopos(danceposes[curridx], 1000u);
+            previdx = curridx;
         }
-        singing = false;
-        tts::TextToVoiceIf::kill();
-        movedancebasepos();
-        ledcall.wait();
-        singingcall.wait();
         movebase();
     }
 
@@ -313,6 +321,62 @@ struct Robot::Handler
 
         ledcall.wait();
         setledoff();
+        movebase();
+    }
+
+    void doheman(const soundactiontype& soundaction)
+    {
+        std::atomic<bool> running{true};
+
+        auto movingaction = [this](std::atomic_bool& running, bool kill) {
+            if (kill)
+            {
+                running = false;
+                return;
+            }
+
+            uint8_t level{255};
+            while (running)
+            {
+                if (level == 255)
+                {
+                    setledon(level = 50);
+                    movetopos({1, 1, 450, 45}, 100.f);
+                    usleep(500 * 1000);
+                }
+                else
+                {
+                    movetopos({-1, -1, 518, 15}, 100.f);
+                    setledon(level = 255);
+                    usleep(1000 * 1000);
+                }
+            }
+            setledoff();
+        };
+
+        speak(task::hemanstart);
+        movetopos({-1, -1, 518, 15}, 100.f);
+
+        auto soundasync =
+            std::async(std::launch::async,
+                       std::bind(soundaction, std::ref(running), false));
+        auto movingasync =
+            std::async(std::launch::async,
+                       std::bind(movingaction, std::ref(running), false));
+
+        while (true)
+        {
+            if (isenterpressed() || !running)
+            {
+                movingaction(running, true);
+                soundaction(running, true);
+                speak(task::hemanend);
+                movingasync.wait();
+                soundasync.wait();
+                break;
+            }
+            usleep(100 * 1000);
+        }
         movebase();
     }
 
@@ -440,6 +504,27 @@ struct Robot::Handler
         return ledstatus;
     }
 
+    void speak(task what, bool async = true)
+    {
+        if (ttsIf)
+        {
+            if (async)
+            {
+                waitspeakdone();
+                ttsasync = std::async(std::launch::async, [this, what]() {
+                    auto inlang = std::get<0>(ttsIf->getvoice());
+                    ttsIf->speak(getttstext(what, inlang));
+                });
+            }
+            else
+            {
+                waitspeakdone();
+                auto inlang = std::get<0>(ttsIf->getvoice());
+                ttsIf->speak(getttstext(what, inlang));
+            }
+        }
+    }
+
   private:
     std::string module{"librobot"};
     std::shared_ptr<http::HttpIf> httpIf;
@@ -553,7 +638,7 @@ struct Robot::Handler
             Handler* handler, const xyzt_t& setpos, uint32_t delayms,
             auto sendcommand = []() {}) :
             handler{handler},
-            setpoint{adapt(setpos)}, currpos{handler->getxyz()}
+            setpoint{adapt(setpos)}
         {
             sendcommand();
             if (!delayms)
@@ -675,8 +760,8 @@ struct Robot::Handler
     {
         while (num--)
         {
-            movetopos({245, 310, 215, 0}, 400u);
-            movetopos({215, 280, 335, 0}, 400u);
+            movetopos({220, 280, 40, 0}, 700u);
+            movetopos({210, 255, 300, 0}, 700u);
         }
     }
 
@@ -696,27 +781,6 @@ struct Robot::Handler
         std::string resp;
         httpIf->get(in, resp);
         return resp;
-    }
-
-    void speak(task what, bool async = true)
-    {
-        if (ttsIf)
-        {
-            if (async)
-            {
-                waitspeakdone();
-                ttsasync = std::async(std::launch::async, [this, what]() {
-                    auto inlang = std::get<0>(ttsIf->getvoice());
-                    ttsIf->speak(getttstext(what, inlang));
-                });
-            }
-            else
-            {
-                waitspeakdone();
-                auto inlang = std::get<0>(ttsIf->getvoice());
-                ttsIf->speak(getttstext(what, inlang));
-            }
-        }
     }
 
     void waitspeakdone()
@@ -874,11 +938,52 @@ bool Robot::shakehand(bool isshown)
     return false;
 }
 
-bool Robot::dance(bool isshown)
+bool Robot::dancesing(bool isshown)
 {
     if (isshown)
         return true;
-    handler->dance();
+
+    handler->dance([this](std::atomic_bool& running, bool kill) {
+        if (kill)
+        {
+            running = false;
+            tts::TextToVoiceIf::kill();
+            return;
+        };
+
+        auto phrases =
+            std::to_array<task>({task::songlinefirst, task::songlinesecond,
+                                 task::songlinethird, task::songlineforth});
+        uint32_t cnt{};
+        while (running)
+        {
+            auto num = (cnt++) % phrases.size();
+            handler->speak(phrases[num], false);
+        }
+    });
+    return false;
+}
+
+bool Robot::dancestream(bool isshown)
+{
+    if (isshown)
+        return true;
+
+    handler->dance([this](std::atomic_bool& running, bool kill) {
+        if (kill)
+        {
+            running = false;
+            shell::BashCommand().run("killall -s KILL ffplay");
+            return;
+        }
+
+        while (running)
+        {
+            shell::BashCommand().run(
+                "yt-dlp https://youtu.be/DedaEVIbTkY -o - 2>/dev/null | ffplay "
+                "-nodisp -autoexit -nostats - &> /dev/null");
+        }
+    });
     return false;
 }
 
@@ -895,6 +1000,26 @@ bool Robot::enlight(bool isshown)
     if (isshown)
         return true;
     handler->enlight();
+    return false;
+}
+
+bool Robot::doheman(bool isshown)
+{
+    if (isshown)
+        return true;
+
+    handler->doheman([this](std::atomic_bool& running, bool kill) {
+        if (kill)
+        {
+            shell::BashCommand().run("killall -s KILL ffplay");
+            return;
+        }
+
+        shell::BashCommand().run(
+            "yt-dlp https://youtu.be/V8h8snfYidg -o - 2>/dev/null | ffplay "
+            "-nodisp -autoexit -nostats - &> /dev/null");
+        running = false;
+    });
     return false;
 }
 
