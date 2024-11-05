@@ -10,15 +10,34 @@
 #include <iostream>
 #include <memory>
 #include <random>
+#include <type_traits>
 
 namespace robot::roarmm2
 {
 
+static constexpr int32_t anglemargin = 1;
+static constexpr int32_t xyztmargin = 10;
 static constexpr int32_t posmargin = 1;
-static constexpr int32_t eoatclosedangle = 180;
+static constexpr int32_t eoatjoint = 4;
+static constexpr int32_t eoatopenedangle = 45;
+static constexpr int32_t eoatclosedangle = 0;
+static constexpr int32_t eoatanglebase = 180;
 
-using xyzt_t = std::tuple<int32_t, int32_t, int32_t, double>;
+using xyzt_t = std::tuple<int32_t, int32_t, int32_t, int32_t>;
 using xyz_t = std::tuple<int32_t, int32_t, int32_t>;
+
+template <typename T>
+concept Positional = std::is_arithmetic_v<T>;
+
+template <typename T>
+concept Difflimit = std::is_integral_v<T>;
+
+template <typename T>
+concept TupleType = requires(T t) {
+    std::tuple_size<T>::value;
+    std::get<0>(t);
+};
+
 struct HttoOutputVisitor
 {
     auto operator()([[maybe_unused]] const std::monostate& arg) -> std::string
@@ -102,7 +121,7 @@ struct Robot::Handler
 
     void moveparked()
     {
-        sendcommand(setposcmd({80, 0, 455, dgrtorad(180 - 35)}));
+        movetopos({80, 0, 455, 35});
     }
 
     void settorqueunlocked()
@@ -124,7 +143,6 @@ struct Robot::Handler
     void setledoff()
     {
         sendcommand({{"T", 114}, {"led", 0}});
-
         ledstatus = false;
     }
 
@@ -149,93 +167,20 @@ struct Robot::Handler
         return {};
     }
 
-    bool seteoat(int32_t rawangle, int32_t& retangle)
+    std::pair<bool, int32_t> seteoat(const int32_t setangle)
     {
-        struct Eoat
-        {
-            Eoat(Handler* handler, int32_t rawangle) :
-                handler{handler}, setpoint{convert(rawangle)},
-                currangle{handler->geteoatangle()}
-            {}
-
-            void move()
-            {
-                handler->sendcommand({{"T", 121},
-                                      {"joint", 4},
-                                      {"angle", setpoint},
-                                      {"spd", 50},
-                                      {"acc", 10}});
-                waitmoving();
-            }
-
-            bool isatposition() const
-            {
-                return handler->isposaccepted(currangle, setpoint);
-            }
-
-            int32_t getposition() const
-            {
-                return convert(currangle);
-            }
-
-          private:
-            const Handler* handler;
-            const int32_t setpoint;
-            const uint32_t maxrepeats{3};
-            int32_t currangle{}, prevangle{};
-            uint32_t repeats{};
-
-            void waitmoving()
-            {
-                while ((currangle = handler->geteoatangle()) != setpoint)
-                {
-                    if (currangle == prevangle)
-                    {
-                        if (handler->isposaccepted(currangle, setpoint))
-                        {
-                            handler->log(
-                                logging::type::debug,
-                                "Eaot not in setpoint, but within margin");
-                            break;
-                        }
-                        if (repeats++ == maxrepeats)
-                        {
-                            handler->log(logging::type::warning,
-                                         "Eaot cannot reach setpoint");
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        repeats = 0;
-                        prevangle = currangle;
-                    }
-                }
-            }
-
-            int32_t convert(int32_t angle) const
-            {
-                return eoatclosedangle - angle;
-            }
-        };
-
-        Eoat eoat{this, rawangle};
-        if (!eoat.isatposition())
-            eoat.move();
-        retangle = eoat.getposition();
-        return eoat.isatposition();
+        MoveJoint eoat{this, eoatjoint, setangle};
+        return eoat.getstatus();
     }
 
     bool openeoat()
     {
-        [[maybe_unused]] int32_t retangle{};
-        return seteoat(45, retangle);
+        return std::get<bool>(seteoat(eoatopenedangle));
     }
 
     bool closeeoat()
     {
-        [[maybe_unused]] int32_t retangle{};
-        return seteoat(0, retangle);
+        return std::get<bool>(seteoat(eoatclosedangle));
     }
 
     std::string getdeviceinfo()
@@ -250,31 +195,23 @@ struct Robot::Handler
 
     void shakehand()
     {
-        movehandshakepos();
         speak(task::greetstart);
-        usleep(2 * 1000 * 1000);
-
-        auto initpos = getxyz();
+        movehandshakepos();
+        auto prevpos = movehandshakepos();
         while (!isenterpressed())
         {
-            if (initpos != getxyz())
+            if (prevpos != getxyz())
             {
                 if (!closeeoat())
                 {
                     speak(task::greetshake);
-                    for (uint8_t cnt{}; cnt < 3; cnt++)
-                    {
-                        dohandshake();
-                    }
+                    dohandshake(3);
                     movehandshakepos();
                     speak(task::greetend);
-                    usleep(1000 * 1000);
                     break;
                 }
                 speak(task::greetfail);
-                movehandshakepos();
-                usleep(2 * 1000 * 1000);
-                initpos = getxyz();
+                prevpos = movehandshakepos();
             }
         }
         movebase();
@@ -295,7 +232,7 @@ struct Robot::Handler
                 auto num = (cnt++) % phrases.size();
                 speak(phrases[num], false);
             }
-            speak(task::danceend);
+            speak(task::danceend, false);
         });
 
         auto ledcall = std::async(std::launch::async, [this, &singing]() {
@@ -311,12 +248,11 @@ struct Robot::Handler
             setledoff();
         });
 
-        auto dancestates =
-            std::to_array<xyzt_t>({{-65, 145, 160, dgrtorad(180 - 65)},
-                                   {-140, 320, 355, dgrtorad(180 - 0)},
-                                   {65, 35, 95, dgrtorad(180 - 25)},
-                                   {60, 110, 455, dgrtorad(180 - 45)},
-                                   {12, 400, -75, dgrtorad(180 - 10)}});
+        auto dancestates = std::to_array<xyzt_t>({{-65, 145, 160, 65},
+                                                  {-140, 320, 355, 0},
+                                                  {65, 35, 95, 25},
+                                                  {60, 110, 455, 45},
+                                                  {12, 400, -75, 10}});
 
         std::random_device os_seed;
         const uint32_t seed = os_seed();
@@ -346,7 +282,7 @@ struct Robot::Handler
         speak(task::enlightstart);
         setledoff();
         movehandshakepos();
-        movetopos({424, 75, 168, dgrtorad(180 - 0)});
+        movetopos({424, 75, 168, 0});
 
         auto ledcall = std::async(std::launch::async, [this]() {
             int32_t step{2};
@@ -355,7 +291,7 @@ struct Robot::Handler
                 setledon((uint8_t)level);
                 usleep(10 * 1000);
             }
-            speak(task::enlightbreak);
+            speak(task::enlightbreak, false);
         });
 
         while (!isenterpressed())
@@ -491,7 +427,12 @@ struct Robot::Handler
 
     bool iseoatclosed()
     {
-        return isposaccepted(geteoatangle(), eoatclosedangle);
+        return isposaccepted(geteoatangle(), eoatclosedangle, anglemargin);
+    }
+
+    bool iseoatopened()
+    {
+        return isposaccepted(geteoatangle(), eoatopenedangle, anglemargin);
     }
 
     bool isledon()
@@ -506,18 +447,170 @@ struct Robot::Handler
     std::shared_ptr<logging::LogIf> logIf;
     std::future<void> ttsasync;
     bool ledstatus{};
-
-    http::inputtype setposcmd(const xyzt_t& pos, double spd)
+    struct MoveJoint
     {
-        const auto [x, y, z, t] = pos;
-        return {{"T", 104}, {"x", x}, {"y", y},
-                {"z", z},   {"t", t}, {"spd", spd}};
+        MoveJoint(Handler* handler, uint32_t joint, int32_t setangle) :
+            handler{handler}, setpoint{setangle},
+            currangle{handler->geteoatangle()}
+        {
+            if (!isatposition())
+            {
+                auto angle = handler->angleadapt(setpoint);
+                handler->sendcommand({{"T", 121},
+                                      {"joint", joint},
+                                      {"angle", angle},
+                                      {"spd", 50},
+                                      {"acc", 10}});
+                waitmoving();
+            }
+        }
+
+        std::pair<bool, int32_t> getstatus() const
+        {
+            return {isatposition(), currangle};
+        }
+
+      private:
+        const Handler* handler;
+        const int32_t setpoint;
+        const uint32_t maxrepeats{3};
+        int32_t currangle{}, prevangle{};
+        uint32_t repeats{};
+
+        bool isatposition() const
+        {
+            return handler->isposaccepted(currangle, setpoint, anglemargin);
+        }
+
+        void waitmoving()
+        {
+            while ((currangle = handler->geteoatangle()) != setpoint)
+            {
+                if (currangle == prevangle)
+                {
+                    if (isatposition())
+                    {
+                        handler->log(logging::type::debug,
+                                     "Joint not in setpoint, but within "
+                                     "acceptable position");
+                        break;
+                    }
+                    if (repeats++ == maxrepeats)
+                    {
+                        handler->log(logging::type::warning,
+                                     "Joint cannot reach setpoint");
+                        break;
+                    }
+                }
+                else
+                {
+                    repeats = 0;
+                    prevangle = currangle;
+                }
+            }
+        }
+    };
+    struct MoveXyz
+    {
+        MoveXyz(Handler* handler, xyzt_t setpos) :
+            MoveXyz(handler, setpos, 0, [&]() {
+                const auto [x, y, z, t] = setpos;
+                auto angle = handler->dgrtorad(handler->angleadapt(t));
+                handler->sendcommand(
+                    {{"T", 1041}, {"x", x}, {"y", y}, {"z", z}, {"t", angle}});
+            })
+        {}
+
+        MoveXyz(Handler* handler, xyzt_t setpos, uint32_t delayms) :
+            MoveXyz(handler, setpos, delayms, [&]() {
+                const auto [x, y, z, t] = setpos;
+                auto angle = handler->dgrtorad(handler->angleadapt(t));
+                handler->sendcommand(
+                    {{"T", 1041}, {"x", x}, {"y", y}, {"z", z}, {"t", angle}});
+            })
+        {}
+
+        MoveXyz(Handler* handler, const xyzt_t& setpos, double speed) :
+            MoveXyz(handler, setpos, 0, [&]() {
+                const auto [x, y, z, t] = setpos;
+                auto angle = handler->dgrtorad(handler->angleadapt(t));
+                handler->sendcommand({{"T", 104},
+                                      {"x", x},
+                                      {"y", y},
+                                      {"z", z},
+                                      {"t", angle},
+                                      {"spd", speed}});
+            })
+        {}
+
+        std::pair<bool, xyz_t> getstatus() const
+        {
+            return {isatposition(), currpos};
+        }
+
+      private:
+        MoveXyz(
+            Handler* handler, const xyzt_t& setpos, uint32_t delayms,
+            auto sendcommand = []() {}) :
+            handler{handler},
+            setpoint{adapt(setpos)}, currpos{handler->getxyz()}
+        {
+            sendcommand();
+            if (!delayms)
+                waitmoving();
+            else
+                usleep(delayms * 1000);
+        }
+
+      private:
+        const Handler* handler;
+        const xyz_t setpoint;
+        const uint32_t maxrepeats{3};
+        xyz_t currpos{}, prevpos{};
+        uint32_t repeats{};
+
+        xyz_t adapt(xyzt_t pos) const
+        {
+            return {std::get<0>(pos), std::get<1>(pos), std::get<2>(pos)};
+        }
+
+        bool isatposition() const
+        {
+            return handler->isposaccepted(currpos, setpoint, xyztmargin);
+        }
+
+        void waitmoving()
+        {
+            while ((currpos = handler->getxyz()) != setpoint)
+            {
+                if (currpos == prevpos)
+                {
+                    if (isatposition())
+                    {
+                        handler->log(logging::type::debug,
+                                     "xyzt not in setpoint, but within "
+                                     "acceptable position");
+                        break;
+                    }
+                    if (repeats++ == maxrepeats)
+                    {
+                        handler->log(logging::type::warning,
+                                     "xyzt position cannot reach setpoint");
+                        break;
+                    }
+                }
+                else
+                {
+                    repeats = 0;
+                    prevpos = currpos;
+                }
+            }
+        }
     };
 
-    http::inputtype setposcmd(const xyzt_t& pos)
+    constexpr int32_t angleadapt(int32_t angle) const
     {
-        const auto [x, y, z, t] = pos;
-        return {{"T", 1041}, {"x", x}, {"y", y}, {"z", z}, {"t", t}};
+        return eoatanglebase - angle;
     }
 
     constexpr double radtodgr(double rad) const
@@ -530,17 +623,7 @@ struct Robot::Handler
         return dgr * M_PI / 180.;
     }
 
-    xyzt_t getxyzt()
-    {
-        http::outputtype ret;
-        sendcommand({{"T", 105}}, ret);
-        return {(int32_t)std::get<double>(ret.at("x")),
-                (int32_t)std::get<double>(ret.at("y")),
-                (int32_t)std::get<double>(ret.at("z")),
-                std::get<double>(ret.at("t"))};
-    }
-
-    xyz_t getxyz()
+    xyz_t getxyz() const
     {
         http::outputtype ret;
         sendcommand({{"T", 105}}, ret);
@@ -549,39 +632,57 @@ struct Robot::Handler
                 (int32_t)std::get<double>(ret.at("z"))};
     }
 
-    int32_t geteoatangle() const
+    xyzt_t getxyzt() const
     {
         http::outputtype ret;
         sendcommand({{"T", 105}}, ret);
-        return (int32_t)radtodgr(std::get<double>(ret.at("t")));
+        return {(int32_t)std::get<double>(ret.at("x")),
+                (int32_t)std::get<double>(ret.at("y")),
+                (int32_t)std::get<double>(ret.at("z")),
+                eoatanglebase -
+                    (int32_t)radtodgr(std::get<double>(ret.at("t")))};
     }
 
-    void movetopos(xyzt_t pos)
+    int32_t geteoatangle() const
     {
-        sendcommand(setposcmd(pos));
+        return std::get<3>(getxyzt());
     }
 
-    void movetopos(xyzt_t pos, uint32_t spd)
+    std::pair<bool, xyz_t> movetopos(const xyzt_t& pos)
     {
-        sendcommand(setposcmd(pos, spd));
+        MoveXyz eoat{this, pos};
+        return eoat.getstatus();
     }
 
-    void movehandshakepos()
+    std::pair<bool, xyz_t> movetopos(const xyzt_t& pos, uint32_t delayms)
     {
-        movetopos({175, 235, 325, dgrtorad(180 - 35)}, 100);
+        MoveXyz eoat{this, pos, delayms};
+        return eoat.getstatus();
     }
 
-    void dohandshake()
+    std::pair<bool, xyz_t> movetopos(xyzt_t pos, double spd)
     {
-        movetopos({245, 310, 215, dgrtorad(180)}, 150);
-        usleep(500 * 1000);
-        movetopos({215, 280, 335, dgrtorad(180)}, 150);
-        usleep(500 * 1000);
+        MoveXyz eoat{this, pos, spd};
+        return eoat.getstatus();
+    }
+
+    xyz_t movehandshakepos()
+    {
+        return std::get<xyz_t>(movetopos({175, 235, 325, 35}));
+    }
+
+    void dohandshake(uint32_t num)
+    {
+        while (num--)
+        {
+            movetopos({245, 310, 215, 0}, 400u);
+            movetopos({215, 280, 335, 0}, 400u);
+        }
     }
 
     void movedancebasepos()
     {
-        movetopos({175, 235, 325, dgrtorad(180 - 35)}, 100);
+        movetopos({175, 235, 325, 35}, 100.f);
     }
 
     bool sendcommand(const http::inputtype& in, http::outputtype& out) const
@@ -636,9 +737,25 @@ struct Robot::Handler
         return str;
     }
 
-    bool isposaccepted(int32_t present, int32_t expected) const
+    bool isposaccepted(Positional auto present, Positional auto expected,
+                       Difflimit auto limit) const
     {
-        return std::abs(present - expected) <= posmargin;
+        return std::abs(present - expected) <= limit;
+    }
+
+    bool isposaccepted(const TupleType auto& present,
+                       const TupleType auto& expected,
+                       Difflimit auto limit) const
+    {
+        return std::apply(
+            [&](auto... x) {
+                return std::apply(
+                    [&](auto... y) {
+                        return (isposaccepted(x, y, limit) && ...);
+                    },
+                    expected);
+            },
+            present);
     }
 };
 
@@ -674,7 +791,7 @@ bool Robot::readservosinfo(bool isshown)
 bool Robot::openeoat(bool isshown)
 {
     if (isshown)
-        return handler->iseoatclosed();
+        return !handler->iseoatopened();
     return !handler->openeoat();
 }
 
