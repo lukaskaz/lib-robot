@@ -1,6 +1,7 @@
 #include "robot/interfaces/roarmm2.hpp"
 
 #include "menu/interfaces/cli.hpp"
+#include "robot/helpers.hpp"
 #include "robot/ttstexts.hpp"
 #include "shellcommand.hpp"
 
@@ -10,7 +11,6 @@
 #include <future>
 #include <iostream>
 #include <memory>
-#include <random>
 #include <type_traits>
 
 namespace robot::roarmm2
@@ -28,7 +28,7 @@ using xyzt_t = std::tuple<int32_t, int32_t, int32_t, int32_t>;
 using xyz_t = std::tuple<int32_t, int32_t, int32_t>;
 
 template <typename T>
-concept Positional = std::is_arithmetic_v<T>;
+concept Positional = robothelpers::Numerical<T>;
 
 template <typename T>
 concept Difflimit = std::is_integral_v<T>;
@@ -259,29 +259,23 @@ struct Robot::Handler
                                    {65, 35, 95, 25},
                                    {60, 110, 455, 45},
                                    {12, 400, -75, 10}});
-        std::random_device os_seed;
-        const uint32_t seed = os_seed();
-        std::mt19937 generator(seed);
-        std::uniform_int_distribution<uint32_t> rand(0, danceposes.size() - 1);
 
-        while (true)
+        robothelpers::Random<uint32_t> randpos({0, danceposes.size() - 1});
+        while (!isenterpressed())
         {
-            if (isenterpressed())
-            {
-                speak(task::danceend);
-                lightaction(running, true);
-                soundaction(running, true);
-                movedancebasepos();
-                lightasync.wait();
-                soundasync.wait();
-                break;
-            }
-            uint32_t curridx{}, previdx{UINT32_MAX};
-            while ((curridx = rand(generator)) == previdx)
+            uint32_t currpos{}, prevpos{UINT32_MAX};
+            while ((currpos = randpos.get()) == prevpos)
                 ;
-            movetopos(danceposes[curridx], 1000u);
-            previdx = curridx;
+            movetopos(danceposes.at(currpos), 1000u);
+            prevpos = currpos;
         }
+
+        speak(task::danceend);
+        lightaction(running, true);
+        soundaction(running, true);
+        movedancebasepos();
+        lightasync.wait();
+        soundasync.wait();
         movebase();
     }
 
