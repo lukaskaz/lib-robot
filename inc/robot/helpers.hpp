@@ -20,7 +20,7 @@ class Random
         gen(rd()), dist{range.first, range.second}
     {}
 
-    T get()
+    T operator()()
     {
         return dist(gen);
     }

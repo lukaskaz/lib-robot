@@ -11,6 +11,7 @@
 #include <future>
 #include <iostream>
 #include <memory>
+#include <source_location>
 #include <type_traits>
 
 namespace robot::roarmm2
@@ -40,6 +41,7 @@ concept TupleType = requires(T t) {
 };
 
 using soundactiontype = std::function<void(std::atomic_bool&, bool)>;
+using lightactiontype = std::function<void(std::atomic_bool&, bool)>;
 
 struct HttoOutputVisitor
 {
@@ -221,29 +223,13 @@ struct Robot::Handler
         movebase();
     }
 
-    void dance(const soundactiontype& soundaction = [](const std::atomic_bool&,
-                                                       bool) {})
+    void dance(
+        const soundactiontype& soundaction = [](const std::atomic_bool&,
+                                                bool) {},
+        const soundactiontype& lightaction = [](const std::atomic_bool&,
+                                                bool) {})
     {
         std::atomic<bool> running{true};
-        auto lightaction = [this](std::atomic_bool& running, bool kill) {
-            if (kill)
-            {
-                running = false;
-                return;
-            }
-
-            bool increase{true};
-            int32_t level{}, step{5};
-            while (running)
-            {
-                increase = level > 120 ? false : level < 10 ? true : increase;
-                level += increase ? step : -step;
-                setledon((uint8_t)level);
-                usleep(1000);
-            }
-            setledoff();
-        };
-
         movedancebasepos();
         speak(task::dancestart, false);
         auto soundasync =
@@ -264,7 +250,7 @@ struct Robot::Handler
         while (!isenterpressed())
         {
             uint32_t currpos{}, prevpos{UINT32_MAX};
-            while ((currpos = randpos.get()) == prevpos)
+            while ((currpos = randpos()) == prevpos)
                 ;
             movetopos(danceposes.at(currpos), 1000u);
             prevpos = currpos;
@@ -415,65 +401,34 @@ struct Robot::Handler
         speak(task::voicechangeend);
     }
 
-    void changelangtopolish()
+    bool changelangtopolish()
     {
-        auto voice = ttsIf->getvoice();
-        auto& lang = std::get<0>(voice);
-        if (lang != tts::language::polish)
-        {
-            lang = tts::language::polish;
-            speak(task::langchangestart);
-            waitspeakdone();
-            ttsIf->setvoice(voice);
-            speak(task::langchangeend);
-        }
-        else
-        {
-            speak(task::nothingtodo);
-        }
+        return changelanguage(tts::language::polish);
     }
 
-    void changelangtoenglish()
+    bool changelangtoenglish()
     {
-        auto voice = ttsIf->getvoice();
-        auto& lang = std::get<0>(voice);
-        if (lang != tts::language::english)
-        {
-            lang = tts::language::english;
-            speak(task::langchangestart);
-            waitspeakdone();
-            ttsIf->setvoice(voice);
-            speak(task::langchangeend);
-        }
-        else
-        {
-            speak(task::nothingtodo);
-        }
+        return changelanguage(tts::language::english);
     }
 
-    void changelangtogerman()
+    bool changelangtogerman()
     {
-        auto voice = ttsIf->getvoice();
-        auto& lang = std::get<0>(voice);
-        if (lang != tts::language::german)
-        {
-            lang = tts::language::german;
-            speak(task::langchangestart);
-            waitspeakdone();
-            ttsIf->setvoice(voice);
-            speak(task::langchangeend);
-        }
-        else
-        {
-            speak(task::nothingtodo);
-        }
+        return changelanguage(tts::language::german);
     }
 
-    void log(logging::type type, const std::string& msg) const
+    bool isttssupported()
+    {
+        return ttsIf ? true : false;
+    }
+
+    void log(
+        logging::type type, const std::string& msg,
+        const std::source_location loc = std::source_location::current()) const
     {
         if (logIf)
         {
-            logIf->log(type, module, msg);
+            logIf->log(type, module,
+                       "[" + std::string(loc.function_name()) + "] " + msg);
         }
     }
 
@@ -500,7 +455,7 @@ struct Robot::Handler
 
     void speak(task what, bool async = true)
     {
-        if (ttsIf)
+        if (isttssupported())
         {
             if (async)
             {
@@ -516,6 +471,10 @@ struct Robot::Handler
                 auto inlang = std::get<0>(ttsIf->getvoice());
                 ttsIf->speak(getttstext(what, inlang));
             }
+        }
+        else
+        {
+            log(logging::type::debug, "tts not supported");
         }
     }
 
@@ -686,6 +645,30 @@ struct Robot::Handler
             }
         }
     };
+
+    bool changelanguage(tts::language newlang)
+    {
+        if (isttssupported())
+        {
+            auto voice = ttsIf->getvoice();
+            auto& lang = std::get<0>(voice);
+            if (lang != newlang)
+            {
+                lang = newlang;
+                speak(task::langchangestart);
+                waitspeakdone();
+                ttsIf->setvoice(voice);
+                speak(task::langchangeend);
+            }
+            else
+            {
+                speak(task::nothingtodo);
+            }
+            return true;
+        }
+        log(logging::type::debug, "tts not supported");
+        return false;
+    }
 
     constexpr int32_t angleadapt(int32_t angle) const
     {
@@ -937,24 +920,43 @@ bool Robot::dancesing(bool isshown)
     if (isshown)
         return true;
 
-    handler->dance([this](std::atomic_bool& running, bool kill) {
-        if (kill)
-        {
-            running = false;
-            tts::TextToVoiceIf::kill();
-            return;
-        };
+    handler->dance(
+        [this](std::atomic_bool& running, bool kill) {
+            if (kill)
+            {
+                running = false;
+                tts::TextToVoiceIf::kill();
+                return;
+            };
 
-        auto phrases =
-            std::to_array<task>({task::songlinefirst, task::songlinesecond,
-                                 task::songlinethird, task::songlineforth});
-        uint32_t cnt{};
-        while (running)
-        {
-            auto num = (cnt++) % phrases.size();
-            handler->speak(phrases[num], false);
-        }
-    });
+            auto phrases =
+                std::to_array<task>({task::songlinefirst, task::songlinesecond,
+                                     task::songlinethird, task::songlineforth});
+            uint32_t cnt{};
+            while (running)
+            {
+                auto num = (cnt++) % phrases.size();
+                handler->speak(phrases[num], false);
+            }
+        },
+        [this](std::atomic_bool& running, bool kill) {
+            if (kill)
+            {
+                running = false;
+                return;
+            }
+
+            bool increase{true};
+            int32_t level{}, step{5};
+            while (running)
+            {
+                increase = level > 120 ? false : level < 10 ? true : increase;
+                level += increase ? step : -step;
+                handler->setledon((uint8_t)level);
+                usleep(1000);
+            }
+            handler->setledoff();
+        });
     return false;
 }
 
@@ -963,21 +965,41 @@ bool Robot::dancestream(bool isshown)
     if (isshown)
         return true;
 
-    handler->dance([this](std::atomic_bool& running, bool kill) {
-        if (kill)
-        {
-            running = false;
-            shell::BashCommand().run("killall -s KILL ffplay");
-            return;
-        }
+    handler->dance(
+        [this](std::atomic_bool& running, bool kill) {
+            if (kill)
+            {
+                running = false;
+                shell::BashCommand().run("killall -s KILL ffplay");
+                return;
+            }
 
-        while (running)
-        {
-            shell::BashCommand().run(
-                "yt-dlp https://youtu.be/DedaEVIbTkY -o - 2>/dev/null | ffplay "
-                "-nodisp -autoexit -nostats - &> /dev/null");
-        }
-    });
+            while (running)
+            {
+                shell::BashCommand().run(
+                    "yt-dlp https://youtu.be/DedaEVIbTkY -o - 2>/dev/null | "
+                    "ffplay "
+                    "-nodisp -autoexit -nostats - &> /dev/null");
+            }
+        },
+        [this](std::atomic_bool& running, bool kill) {
+            if (kill)
+            {
+                running = false;
+                return;
+            }
+
+            bool increase{true};
+            int32_t level{}, step{5};
+            while (running)
+            {
+                increase = level > 120 ? false : level < 10 ? true : increase;
+                level += increase ? step : -step;
+                handler->setledon((uint8_t)level);
+                usleep(1000);
+            }
+            handler->setledoff();
+        });
     return false;
 }
 
@@ -1040,7 +1062,7 @@ bool Robot::sendusercmd(bool isshown)
 bool Robot::changevoice(bool isshown)
 {
     if (isshown)
-        return true;
+        return handler->isttssupported();
     handler->changevoice();
     return false;
 }
@@ -1048,25 +1070,25 @@ bool Robot::changevoice(bool isshown)
 bool Robot::changelangtopolish(bool isshown)
 {
     if (isshown)
-        return handler->getlanguage() != tts::language::polish;
-    handler->changelangtopolish();
-    return false;
+        return handler->isttssupported() &&
+               handler->getlanguage() != tts::language::polish;
+    return !handler->changelangtopolish();
 }
 
 bool Robot::changelangtoenglish(bool isshown)
 {
     if (isshown)
-        return handler->getlanguage() != tts::language::english;
-    handler->changelangtoenglish();
-    return false;
+        return handler->isttssupported() &&
+               handler->getlanguage() != tts::language::english;
+    return !handler->changelangtoenglish();
 }
 
 bool Robot::changelangtogerman(bool isshown)
 {
     if (isshown)
-        return handler->getlanguage() != tts::language::german;
-    handler->changelangtogerman();
-    return false;
+        return handler->isttssupported() &&
+               handler->getlanguage() != tts::language::german;
+    return !handler->changelangtogerman();
 }
 
 } // namespace robot::roarmm2
