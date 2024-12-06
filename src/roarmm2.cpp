@@ -40,8 +40,8 @@ concept TupleType = requires(T t) {
     std::get<0>(t);
 };
 
-using soundactiontype = std::function<void(std::atomic_bool&, bool)>;
-using lightactiontype = std::function<void(std::atomic_bool&, bool)>;
+using soundactiontype = std::function<void(std::stop_token, bool)>;
+using lightactiontype = std::function<void(std::stop_token, bool)>;
 
 struct HttoOutputVisitor
 {
@@ -224,20 +224,18 @@ struct Robot::Handler
     }
 
     void dance(
-        const soundactiontype& soundaction = [](const std::atomic_bool&,
-                                                bool) {},
-        const soundactiontype& lightaction = [](const std::atomic_bool&,
-                                                bool) {})
+        const soundactiontype& soundaction = [](std::stop_token, bool) {},
+        const soundactiontype& lightaction = [](std::stop_token, bool) {})
     {
-        std::atomic<bool> running{true};
+        std::stop_source running;
         movedancebasepos();
         speak(task::dancestart, false);
         auto soundasync =
             std::async(std::launch::async,
-                       std::bind(soundaction, std::ref(running), false));
+                       std::bind(soundaction, running.get_token(), false));
         auto lightasync =
             std::async(std::launch::async,
-                       std::bind(lightaction, std::ref(running), false));
+                       std::bind(lightaction, running.get_token(), false));
 
         static constexpr auto danceposes =
             std::to_array<xyzt_t>({{-65, 145, 160, 65},
@@ -257,8 +255,9 @@ struct Robot::Handler
         }
 
         speak(task::danceend);
-        lightaction(running, true);
-        soundaction(running, true);
+        lightaction(running.get_token(), true);
+        soundaction(running.get_token(), true);
+        running.request_stop();
         movedancebasepos();
         lightasync.wait();
         soundasync.wait();
@@ -306,17 +305,15 @@ struct Robot::Handler
 
     void doheman(const soundactiontype& soundaction)
     {
-        std::atomic<bool> running{true};
-
-        auto movingaction = [this](std::atomic_bool& running, bool kill) {
-            if (kill)
+        std::stop_source running;
+        auto movingaction = [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
             {
-                running = false;
                 return;
             }
 
             uint8_t level{255};
-            while (running)
+            while (!running.stop_requested())
             {
                 if (level == 255)
                 {
@@ -339,17 +336,19 @@ struct Robot::Handler
 
         auto soundasync =
             std::async(std::launch::async,
-                       std::bind(soundaction, std::ref(running), false));
+                       std::bind(soundaction, running.get_token(), false));
         auto movingasync =
             std::async(std::launch::async,
-                       std::bind(movingaction, std::ref(running), false));
+                       std::bind(movingaction, running.get_token(), false));
 
         while (true)
         {
-            if (isenterpressed() || !running)
+            if (isenterpressed() || soundasync.wait_for(std::chrono::seconds(
+                                        0)) == std::future_status::ready)
             {
-                movingaction(running, true);
-                soundaction(running, true);
+                movingaction(running.get_token(), true);
+                soundaction(running.get_token(), true);
+                running.request_stop();
                 speak(task::hemanend);
                 movingasync.wait();
                 soundasync.wait();
@@ -921,10 +920,9 @@ bool Robot::dancesing(bool isshown)
         return true;
 
     handler->dance(
-        [this](std::atomic_bool& running, bool kill) {
-            if (kill)
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
             {
-                running = false;
                 tts::TextToVoiceIf::kill();
                 return;
             };
@@ -933,22 +931,21 @@ bool Robot::dancesing(bool isshown)
                 std::to_array<task>({task::songlinefirst, task::songlinesecond,
                                      task::songlinethird, task::songlineforth});
             uint32_t cnt{};
-            while (running)
+            while (!running.stop_requested())
             {
                 auto num = (cnt++) % phrases.size();
                 handler->speak(phrases[num], false);
             }
         },
-        [this](std::atomic_bool& running, bool kill) {
-            if (kill)
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
             {
-                running = false;
                 return;
             }
 
             bool increase{true};
             int32_t level{}, step{5};
-            while (running)
+            while (!running.stop_requested())
             {
                 increase = level > 120 ? false : level < 10 ? true : increase;
                 level += increase ? step : -step;
@@ -966,15 +963,14 @@ bool Robot::dancestream(bool isshown)
         return true;
 
     handler->dance(
-        [this](std::atomic_bool& running, bool kill) {
-            if (kill)
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
             {
-                running = false;
                 shell::BashCommand().run("killall -s KILL ffplay");
                 return;
             }
 
-            while (running)
+            while (!running.stop_requested())
             {
                 shell::BashCommand().run(
                     "yt-dlp https://youtu.be/DedaEVIbTkY -o - 2>/dev/null | "
@@ -982,16 +978,15 @@ bool Robot::dancestream(bool isshown)
                     "-nodisp -autoexit -nostats - &> /dev/null");
             }
         },
-        [this](std::atomic_bool& running, bool kill) {
-            if (kill)
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
             {
-                running = false;
                 return;
             }
 
             bool increase{true};
             int32_t level{}, step{5};
-            while (running)
+            while (!running.stop_requested())
             {
                 increase = level > 120 ? false : level < 10 ? true : increase;
                 level += increase ? step : -step;
@@ -1024,8 +1019,8 @@ bool Robot::doheman(bool isshown)
     if (isshown)
         return true;
 
-    handler->doheman([this](std::atomic_bool& running, bool kill) {
-        if (kill)
+    handler->doheman([this](std::stop_token, bool cleanup) {
+        if (cleanup)
         {
             shell::BashCommand().run("killall -s KILL ffplay");
             return;
@@ -1034,7 +1029,6 @@ bool Robot::doheman(bool isshown)
         shell::BashCommand().run(
             "yt-dlp https://youtu.be/V8h8snfYidg -o - 2>/dev/null | ffplay "
             "-nodisp -autoexit -nostats - &> /dev/null");
-        running = false;
     });
     return false;
 }
