@@ -29,8 +29,10 @@ class Robot : public RobotIf
     bool sendusercmd(bool) override;
 
     bool shakehand(bool) override;
-    bool dance(bool) override;
+    bool dancesing(bool) override;
+    bool dancestream(bool) override;
     bool enlight(bool) override;
+    bool doheman(bool) override;
     bool engage() override;
     bool disengage() override;
 

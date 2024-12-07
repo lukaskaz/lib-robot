@@ -30,8 +30,10 @@ class RobotIf
     virtual bool sendusercmd(bool) = 0;
 
     virtual bool shakehand(bool) = 0;
-    virtual bool dance(bool) = 0;
+    virtual bool dancesing(bool) = 0;
+    virtual bool dancestream(bool) = 0;
     virtual bool enlight(bool) = 0;
+    virtual bool doheman(bool) = 0;
     virtual bool engage() = 0;
     virtual bool disengage() = 0;
 

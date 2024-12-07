@@ -23,6 +23,7 @@ add_dependencies(${PROJECT_NAME} libtts)
 add_dependencies(${PROJECT_NAME} libhttp)
 add_dependencies(${PROJECT_NAME} libshellcmd)
 add_dependencies(${PROJECT_NAME} liblogger)
+add_dependencies(${PROJECT_NAME} librandom)
 
 target_link_libraries(${PROJECT_NAME}
     menu

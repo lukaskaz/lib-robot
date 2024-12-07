@@ -25,6 +25,8 @@ enum class task
     enlightstart,
     enlightend,
     enlightbreak,
+    hemanstart,
+    hemanend,
     voicechangestart,
     voicechangeend,
     langchangestart,

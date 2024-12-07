@@ -110,6 +110,19 @@ const std::unordered_map<task, langmap> ttstextmap = {
          {tts::language::german, "aufklärung abgeschlossen"},
 
      }},
+    {task::hemanstart,
+     {
+         {tts::language::polish, "na moc posępnego czerepa"},
+         {tts::language::english, "let's go with he-man stuff"},
+         {tts::language::german, "lass uns das he-man-zeug machen"},
+     }},
+    {task::hemanend,
+     {
+         {tts::language::polish, "no i moc poszła się jebać"},
+         {tts::language::english, "and so the power is depleted"},
+         {tts::language::german, "und so ist die energie erschöpft"},
+
+     }},
     {task::enlightbreak,
      {
          {tts::language::polish, "klepnij enter żeby zakończyć"},
