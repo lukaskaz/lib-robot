@@ -1,6 +1,8 @@
 #include "robot/interfaces/roarmm2.hpp"
 
+#include "generators/uniform.hpp"
 #include "menu/interfaces/cli.hpp"
+#include "random/builder.hpp"
 #include "robot/helpers.hpp"
 #include "robot/ttstexts.hpp"
 #include "shellcommand.hpp"
@@ -11,6 +13,7 @@
 #include <future>
 #include <iostream>
 #include <memory>
+#include <numbers>
 #include <source_location>
 #include <type_traits>
 
@@ -40,8 +43,7 @@ concept TupleType = requires(T t) {
     std::get<0>(t);
 };
 
-using soundactiontype = std::function<void(std::stop_token, bool)>;
-using lightactiontype = std::function<void(std::stop_token, bool)>;
+using actiontype = std::function<void(std::stop_token, bool)>;
 
 struct HttoOutputVisitor
 {
@@ -224,8 +226,8 @@ struct Robot::Handler
     }
 
     void dance(
-        const soundactiontype& soundaction = [](std::stop_token, bool) {},
-        const soundactiontype& lightaction = [](std::stop_token, bool) {})
+        const actiontype& soundaction = [](std::stop_token, bool) {},
+        const actiontype& lightaction = [](std::stop_token, bool) {})
     {
         std::stop_source running;
         movedancebasepos();
@@ -244,7 +246,8 @@ struct Robot::Handler
                                    {60, 110, 455, 45},
                                    {12, 400, -75, 10}});
 
-        robothelpers::Random<uint32_t> randpos({0, danceposes.size() - 1});
+        auto randpos = Builder::get<Uniform<uint32_t>>(
+            std::make_pair(0, danceposes.size() - 1));
         while (!isenterpressed())
         {
             uint32_t currpos{}, prevpos{UINT32_MAX};
@@ -266,44 +269,32 @@ struct Robot::Handler
 
     void enlight()
     {
+        static constexpr uint8_t ledmin{0}, ledmax{120}, ledstep{2};
         speak(task::enlightstart);
         setledoff();
         movehandshakepos();
         movetopos({424, 75, 168, 0});
-
-        auto ledcall = std::async(std::launch::async, [this]() {
-            int32_t step{2};
-            for (int32_t level{0}; level < 120; level += step)
-            {
-                setledon((uint8_t)level);
-                usleep(10 * 1000);
-            }
-            speak(task::enlightbreak, false);
-        });
-
+        speak(task::enlightbreak);
+        for (uint8_t level{ledmin}; level < ledmax; level += ledstep)
+        {
+            setledon(level);
+            usleep(10 * 1000);
+        }
         while (!isenterpressed())
         {
             usleep(100 * 1000);
         }
-
-        ledcall.wait();
         speak(task::enlightend);
-
-        ledcall = std::async(std::launch::async, [this]() {
-            int32_t step{2};
-            for (int32_t level{120}; level > 0; level -= step)
-            {
-                setledon((uint8_t)level);
-                usleep(1000);
-            }
-        });
-
-        ledcall.wait();
+        for (uint8_t level{ledmax}; level > ledmin; level -= ledstep)
+        {
+            setledon(level);
+            usleep(1000);
+        }
         setledoff();
         movebase();
     }
 
-    void doheman(const soundactiontype& soundaction)
+    void doheman(const actiontype& soundaction = [](std::stop_token, bool) {})
     {
         std::stop_source running;
         auto movingaction = [this](std::stop_token running, bool cleanup) {
@@ -312,19 +303,20 @@ struct Robot::Handler
                 return;
             }
 
-            uint8_t level{255};
+            static constexpr uint8_t levelmax{255}, levelmin{50};
+            uint8_t level{levelmax};
             while (!running.stop_requested())
             {
-                if (level == 255)
+                if (level == levelmax)
                 {
-                    setledon(level = 50);
+                    setledon(level = levelmin);
                     movetopos({1, 1, 450, 45}, 100.f);
                     usleep(500 * 1000);
                 }
                 else
                 {
                     movetopos({-1, -1, 518, 15}, 100.f);
-                    setledon(level = 255);
+                    setledon(level = levelmax);
                     usleep(1000 * 1000);
                 }
             }
@@ -341,21 +333,18 @@ struct Robot::Handler
             std::async(std::launch::async,
                        std::bind(movingaction, running.get_token(), false));
 
-        while (true)
+        while (!isenterpressed() && soundasync.wait_for(std::chrono::seconds(
+                                        0)) != std::future_status::ready)
         {
-            if (isenterpressed() || soundasync.wait_for(std::chrono::seconds(
-                                        0)) == std::future_status::ready)
-            {
-                movingaction(running.get_token(), true);
-                soundaction(running.get_token(), true);
-                running.request_stop();
-                speak(task::hemanend);
-                movingasync.wait();
-                soundasync.wait();
-                break;
-            }
             usleep(100 * 1000);
         }
+
+        movingaction(running.get_token(), true);
+        soundaction(running.get_token(), true);
+        running.request_stop();
+        speak(task::hemanend);
+        movingasync.wait();
+        soundasync.wait();
         movebase();
     }
 
@@ -676,12 +665,12 @@ struct Robot::Handler
 
     constexpr double radtodgr(double rad) const
     {
-        return round(rad * 180. / M_PI);
+        return std::round(rad * 180. / std::numbers::pi_v<double>);
     }
 
     constexpr double dgrtorad(double dgr) const
     {
-        return dgr * M_PI / 180.;
+        return dgr * std::numbers::pi_v<double> / 180.;
     }
 
     xyz_t getxyz() const
