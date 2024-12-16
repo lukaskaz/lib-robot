@@ -1,8 +1,7 @@
 #include "robot/interfaces/roarmm2.hpp"
 
-#include "generators/uniform.hpp"
 #include "menu/interfaces/cli.hpp"
-#include "random/builder.hpp"
+#include "random/generators/uniform.hpp"
 #include "robot/helpers.hpp"
 #include "robot/ttstexts.hpp"
 #include "shellcommand.hpp"
