@@ -1,7 +1,10 @@
 #include "robot/interfaces/roarmm2.hpp"
 
 #include "menu/interfaces/cli.hpp"
+#include "random/generators/uniform.hpp"
+#include "robot/helpers.hpp"
 #include "robot/ttstexts.hpp"
+#include "shellcommand.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,16 +12,38 @@
 #include <future>
 #include <iostream>
 #include <memory>
-#include <random>
+#include <numbers>
+#include <source_location>
+#include <type_traits>
 
 namespace robot::roarmm2
 {
 
+static constexpr int32_t anglemargin = 1;
+static constexpr int32_t xyztmargin = 10;
 static constexpr int32_t posmargin = 1;
-static constexpr int32_t eoatclosedangle = 180;
+static constexpr int32_t eoatjoint = 4;
+static constexpr int32_t eoatopenedangle = 45;
+static constexpr int32_t eoatclosedangle = 0;
+static constexpr int32_t eoatanglebase = 180;
 
-using xyzt_t = std::tuple<int32_t, int32_t, int32_t, double>;
+using xyzt_t = std::tuple<int32_t, int32_t, int32_t, int32_t>;
 using xyz_t = std::tuple<int32_t, int32_t, int32_t>;
+
+template <typename T>
+concept Positional = robothelpers::Numerical<T>;
+
+template <typename T>
+concept Difflimit = std::is_integral_v<T>;
+
+template <typename T>
+concept TupleType = requires(T t) {
+    std::tuple_size<T>::value;
+    std::get<0>(t);
+};
+
+using actiontype = std::function<void(std::stop_token, bool)>;
+
 struct HttoOutputVisitor
 {
     auto operator()([[maybe_unused]] const std::monostate& arg) -> std::string
@@ -76,33 +101,34 @@ struct Robot::Handler
         settorquelocked();
     }
 
-    void movebase()
+    void movebase(bool inform = true)
     {
         sendcommand({{"T", 100}});
-        speak(task::ready);
+        if (inform)
+            speak(task::ready);
     }
 
     void moveleft()
     {
-        sendcommand({{"T", 121},
-                     {"joint", 1},
-                     {"angle", 45},
-                     {"spd", 10},
-                     {"acc", 10}});
+        movebase(false);
+        auto pos = getxyzt();
+        auto& axistomove = std::get<1>(pos);
+        axistomove += 200;
+        movetopos(pos, 1.f);
     }
 
     void moveright()
     {
-        sendcommand({{"T", 121},
-                     {"joint", 1},
-                     {"angle", -45},
-                     {"spd", 10},
-                     {"acc", 10}});
+        movebase(false);
+        auto pos = getxyzt();
+        auto& axistomove = std::get<1>(pos);
+        axistomove -= 200;
+        movetopos(pos, 1.f);
     }
 
     void moveparked()
     {
-        sendcommand(setposcmd({80, 0, 455, dgrtorad(180 - 35)}));
+        movetopos({80, 0, 455, 35});
     }
 
     void settorqueunlocked()
@@ -124,7 +150,6 @@ struct Robot::Handler
     void setledoff()
     {
         sendcommand({{"T", 114}, {"led", 0}});
-
         ledstatus = false;
     }
 
@@ -143,99 +168,27 @@ struct Robot::Handler
         http::outputtype output;
         if (sendcommand({{"T", 105}}, output))
         {
-            auto eoatdgr = (int32_t)radtodgr(std::get<double>(output.at("t")));
+            auto eoatdgr = eoatanglebase -
+                           (int32_t)radtodgr(std::get<double>(output.at("t")));
             return getstrfromhttp(output) + "t : " + std::to_string(eoatdgr);
         }
         return {};
     }
 
-    bool seteoat(int32_t rawangle, int32_t& retangle)
+    std::pair<bool, int32_t> seteoat(const int32_t setangle)
     {
-        struct Eoat
-        {
-            Eoat(Handler* handler, int32_t rawangle) :
-                handler{handler}, setpoint{convert(rawangle)},
-                currangle{handler->geteoatangle()}
-            {}
-
-            void move()
-            {
-                handler->sendcommand({{"T", 121},
-                                      {"joint", 4},
-                                      {"angle", setpoint},
-                                      {"spd", 50},
-                                      {"acc", 10}});
-                waitmoving();
-            }
-
-            bool isatposition() const
-            {
-                return handler->isposaccepted(currangle, setpoint);
-            }
-
-            int32_t getposition() const
-            {
-                return convert(currangle);
-            }
-
-          private:
-            const Handler* handler;
-            const int32_t setpoint;
-            const uint32_t maxrepeats{3};
-            int32_t currangle{}, prevangle{};
-            uint32_t repeats{};
-
-            void waitmoving()
-            {
-                while ((currangle = handler->geteoatangle()) != setpoint)
-                {
-                    if (currangle == prevangle)
-                    {
-                        if (handler->isposaccepted(currangle, setpoint))
-                        {
-                            handler->log(
-                                logging::type::debug,
-                                "Eaot not in setpoint, but within margin");
-                            break;
-                        }
-                        if (repeats++ == maxrepeats)
-                        {
-                            handler->log(logging::type::warning,
-                                         "Eaot cannot reach setpoint");
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        repeats = 0;
-                        prevangle = currangle;
-                    }
-                }
-            }
-
-            int32_t convert(int32_t angle) const
-            {
-                return eoatclosedangle - angle;
-            }
-        };
-
-        Eoat eoat{this, rawangle};
-        if (!eoat.isatposition())
-            eoat.move();
-        retangle = eoat.getposition();
-        return eoat.isatposition();
+        MoveJoint eoat{this, eoatjoint, setangle};
+        return eoat.getstatus();
     }
 
     bool openeoat()
     {
-        [[maybe_unused]] int32_t retangle{};
-        return seteoat(45, retangle);
+        return std::get<bool>(seteoat(eoatopenedangle));
     }
 
     bool closeeoat()
     {
-        [[maybe_unused]] int32_t retangle{};
-        return seteoat(0, retangle);
+        return std::get<bool>(seteoat(eoatclosedangle));
     }
 
     std::string getdeviceinfo()
@@ -250,133 +203,147 @@ struct Robot::Handler
 
     void shakehand()
     {
-        movehandshakepos();
         speak(task::greetstart);
-        usleep(2 * 1000 * 1000);
-
-        auto initpos = getxyz();
+        auto prevxyz = movehandshakepos();
         while (!isenterpressed())
         {
-            if (initpos != getxyz())
+            if (prevxyz != getxyz())
             {
                 if (!closeeoat())
                 {
                     speak(task::greetshake);
-                    for (uint8_t cnt{}; cnt < 3; cnt++)
-                    {
-                        dohandshake();
-                    }
-                    movehandshakepos();
+                    dohandshake(3);
                     speak(task::greetend);
-                    usleep(1000 * 1000);
                     break;
                 }
                 speak(task::greetfail);
-                movehandshakepos();
-                usleep(2 * 1000 * 1000);
-                initpos = getxyz();
+                prevxyz = movehandshakepos();
             }
         }
+        movehandshakepos();
         movebase();
     }
 
-    void dance()
+    void dance(
+        const actiontype& soundaction = [](std::stop_token, bool) {},
+        const actiontype& lightaction = [](std::stop_token, bool) {})
     {
-        std::atomic<bool> singing{true};
+        std::stop_source running;
         movedancebasepos();
-        speak(task::dancestart);
-        auto singingcall = std::async(std::launch::async, [this, &singing]() {
-            auto phrases =
-                std::to_array<task>({task::songlinefirst, task::songlinesecond,
-                                     task::songlinethird, task::songlineforth});
-            uint32_t cnt{};
-            while (singing)
-            {
-                auto num = (cnt++) % phrases.size();
-                speak(phrases[num], false);
-            }
-            speak(task::danceend);
-        });
+        speak(task::dancestart, false);
+        auto soundasync =
+            std::async(std::launch::async,
+                       std::bind(soundaction, running.get_token(), false));
+        auto lightasync =
+            std::async(std::launch::async,
+                       std::bind(lightaction, running.get_token(), false));
 
-        auto ledcall = std::async(std::launch::async, [this, &singing]() {
-            bool increase{true};
-            int32_t level{}, step{5};
-            while (singing)
-            {
-                increase = level > 120 ? false : level < 10 ? true : increase;
-                level += increase ? step : -step;
-                setledon((uint8_t)level);
-                usleep(1000);
-            }
-            setledoff();
-        });
+        static constexpr auto danceposes =
+            std::to_array<xyzt_t>({{-65, 145, 160, 65},
+                                   {-140, 320, 355, 0},
+                                   {65, 35, 95, 25},
+                                   {60, 110, 455, 45},
+                                   {12, 400, -75, 10}});
 
-        auto dancestates =
-            std::to_array<xyzt_t>({{-65, 145, 160, dgrtorad(180 - 65)},
-                                   {-140, 320, 355, dgrtorad(180 - 0)},
-                                   {65, 35, 95, dgrtorad(180 - 25)},
-                                   {60, 110, 455, dgrtorad(180 - 45)},
-                                   {12, 400, -75, dgrtorad(180 - 10)}});
-
-        std::random_device os_seed;
-        const uint32_t seed = os_seed();
-        std::mt19937 generator(seed);
-        std::uniform_int_distribution<uint32_t> rand(0, dancestates.size() - 1);
-
+        auto randpos = Builder::get<Uniform<uint32_t>>(
+            std::make_pair(0, danceposes.size() - 1));
         while (!isenterpressed())
         {
-            static uint32_t prevpos{UINT32_MAX};
-            uint32_t pos{};
-            while ((pos = rand(generator)) == prevpos)
+            uint32_t currpos{}, prevpos{UINT32_MAX};
+            while ((currpos = randpos()) == prevpos)
                 ;
-            movetopos(dancestates[pos]);
-            prevpos = pos;
-            usleep(1200 * 1000);
+            movetopos(danceposes.at(currpos), 1000u);
+            prevpos = currpos;
         }
-        singing = false;
-        tts::TextToVoiceIf::kill();
+
+        speak(task::danceend);
+        lightaction(running.get_token(), true);
+        soundaction(running.get_token(), true);
+        running.request_stop();
         movedancebasepos();
-        ledcall.wait();
-        singingcall.wait();
+        lightasync.wait();
+        soundasync.wait();
         movebase();
     }
 
     void enlight()
     {
+        static constexpr uint8_t ledmin{0}, ledmax{120}, ledstep{2};
         speak(task::enlightstart);
         setledoff();
         movehandshakepos();
-        movetopos({424, 75, 168, dgrtorad(180 - 0)});
-
-        auto ledcall = std::async(std::launch::async, [this]() {
-            int32_t step{2};
-            for (int32_t level{0}; level < 120; level += step)
-            {
-                setledon((uint8_t)level);
-                usleep(10 * 1000);
-            }
-            speak(task::enlightbreak);
-        });
-
+        movetopos({424, 75, 168, 0});
+        speak(task::enlightbreak);
+        for (uint8_t level{ledmin}; level < ledmax; level += ledstep)
+        {
+            setledon(level);
+            usleep(10 * 1000);
+        }
         while (!isenterpressed())
         {
             usleep(100 * 1000);
         }
-
-        ledcall.wait();
         speak(task::enlightend);
-
-        ledcall = std::async(std::launch::async, [this]() {
-            int32_t step{2};
-            for (int32_t level{120}; level > 0; level -= step)
-            {
-                setledon((uint8_t)level);
-                usleep(1000);
-            }
-        });
-
-        ledcall.wait();
+        for (uint8_t level{ledmax}; level > ledmin; level -= ledstep)
+        {
+            setledon(level);
+            usleep(1000);
+        }
         setledoff();
+        movebase();
+    }
+
+    void doheman(const actiontype& soundaction = [](std::stop_token, bool) {})
+    {
+        std::stop_source running;
+        auto movingaction = [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
+            {
+                return;
+            }
+
+            static constexpr uint8_t levelmax{255}, levelmin{50};
+            uint8_t level{levelmax};
+            while (!running.stop_requested())
+            {
+                if (level == levelmax)
+                {
+                    setledon(level = levelmin);
+                    movetopos({1, 1, 450, 45}, 100.f);
+                    usleep(500 * 1000);
+                }
+                else
+                {
+                    movetopos({-1, -1, 518, 15}, 100.f);
+                    setledon(level = levelmax);
+                    usleep(1000 * 1000);
+                }
+            }
+            setledoff();
+        };
+
+        speak(task::hemanstart);
+        movetopos({-1, -1, 518, 15}, 100.f);
+
+        auto soundasync =
+            std::async(std::launch::async,
+                       std::bind(soundaction, running.get_token(), false));
+        auto movingasync =
+            std::async(std::launch::async,
+                       std::bind(movingaction, running.get_token(), false));
+
+        while (!isenterpressed() && soundasync.wait_for(std::chrono::seconds(
+                                        0)) != std::future_status::ready)
+        {
+            usleep(100 * 1000);
+        }
+
+        movingaction(running.get_token(), true);
+        soundaction(running.get_token(), true);
+        running.request_stop();
+        speak(task::hemanend);
+        movingasync.wait();
+        soundasync.wait();
         movebase();
     }
 
@@ -421,65 +388,34 @@ struct Robot::Handler
         speak(task::voicechangeend);
     }
 
-    void changelangtopolish()
+    bool changelangtopolish()
     {
-        auto voice = ttsIf->getvoice();
-        auto& lang = std::get<0>(voice);
-        if (lang != tts::language::polish)
-        {
-            lang = tts::language::polish;
-            speak(task::langchangestart);
-            waitspeakdone();
-            ttsIf->setvoice(voice);
-            speak(task::langchangeend);
-        }
-        else
-        {
-            speak(task::nothingtodo);
-        }
+        return changelanguage(tts::language::polish);
     }
 
-    void changelangtoenglish()
+    bool changelangtoenglish()
     {
-        auto voice = ttsIf->getvoice();
-        auto& lang = std::get<0>(voice);
-        if (lang != tts::language::english)
-        {
-            lang = tts::language::english;
-            speak(task::langchangestart);
-            waitspeakdone();
-            ttsIf->setvoice(voice);
-            speak(task::langchangeend);
-        }
-        else
-        {
-            speak(task::nothingtodo);
-        }
+        return changelanguage(tts::language::english);
     }
 
-    void changelangtogerman()
+    bool changelangtogerman()
     {
-        auto voice = ttsIf->getvoice();
-        auto& lang = std::get<0>(voice);
-        if (lang != tts::language::german)
-        {
-            lang = tts::language::german;
-            speak(task::langchangestart);
-            waitspeakdone();
-            ttsIf->setvoice(voice);
-            speak(task::langchangeend);
-        }
-        else
-        {
-            speak(task::nothingtodo);
-        }
+        return changelanguage(tts::language::german);
     }
 
-    void log(logging::type type, const std::string& msg) const
+    bool isttssupported()
+    {
+        return ttsIf ? true : false;
+    }
+
+    void log(
+        logging::type type, const std::string& msg,
+        const std::source_location loc = std::source_location::current()) const
     {
         if (logIf)
         {
-            logIf->log(type, module, msg);
+            logIf->log(type, module,
+                       "[" + std::string(loc.function_name()) + "] " + msg);
         }
     }
 
@@ -491,7 +427,12 @@ struct Robot::Handler
 
     bool iseoatclosed()
     {
-        return isposaccepted(geteoatangle(), eoatclosedangle);
+        return isposaccepted(geteoatangle(), eoatclosedangle, anglemargin);
+    }
+
+    bool iseoatopened()
+    {
+        return isposaccepted(geteoatangle(), eoatopenedangle, anglemargin);
     }
 
     bool isledon()
@@ -499,107 +440,9 @@ struct Robot::Handler
         return ledstatus;
     }
 
-  private:
-    std::string module{"librobot"};
-    std::shared_ptr<http::HttpIf> httpIf;
-    std::shared_ptr<tts::TextToVoiceIf> ttsIf;
-    std::shared_ptr<logging::LogIf> logIf;
-    std::future<void> ttsasync;
-    bool ledstatus{};
-
-    http::inputtype setposcmd(const xyzt_t& pos, double spd)
-    {
-        const auto [x, y, z, t] = pos;
-        return {{"T", 104}, {"x", x}, {"y", y},
-                {"z", z},   {"t", t}, {"spd", spd}};
-    };
-
-    http::inputtype setposcmd(const xyzt_t& pos)
-    {
-        const auto [x, y, z, t] = pos;
-        return {{"T", 1041}, {"x", x}, {"y", y}, {"z", z}, {"t", t}};
-    }
-
-    constexpr double radtodgr(double rad) const
-    {
-        return round(rad * 180. / M_PI);
-    }
-
-    constexpr double dgrtorad(double dgr) const
-    {
-        return dgr * M_PI / 180.;
-    }
-
-    xyzt_t getxyzt()
-    {
-        http::outputtype ret;
-        sendcommand({{"T", 105}}, ret);
-        return {(int32_t)std::get<double>(ret.at("x")),
-                (int32_t)std::get<double>(ret.at("y")),
-                (int32_t)std::get<double>(ret.at("z")),
-                std::get<double>(ret.at("t"))};
-    }
-
-    xyz_t getxyz()
-    {
-        http::outputtype ret;
-        sendcommand({{"T", 105}}, ret);
-        return {(int32_t)std::get<double>(ret.at("x")),
-                (int32_t)std::get<double>(ret.at("y")),
-                (int32_t)std::get<double>(ret.at("z"))};
-    }
-
-    int32_t geteoatangle() const
-    {
-        http::outputtype ret;
-        sendcommand({{"T", 105}}, ret);
-        return (int32_t)radtodgr(std::get<double>(ret.at("t")));
-    }
-
-    void movetopos(xyzt_t pos)
-    {
-        sendcommand(setposcmd(pos));
-    }
-
-    void movetopos(xyzt_t pos, uint32_t spd)
-    {
-        sendcommand(setposcmd(pos, spd));
-    }
-
-    void movehandshakepos()
-    {
-        movetopos({175, 235, 325, dgrtorad(180 - 35)}, 100);
-    }
-
-    void dohandshake()
-    {
-        movetopos({245, 310, 215, dgrtorad(180)}, 150);
-        usleep(500 * 1000);
-        movetopos({215, 280, 335, dgrtorad(180)}, 150);
-        usleep(500 * 1000);
-    }
-
-    void movedancebasepos()
-    {
-        movetopos({175, 235, 325, dgrtorad(180 - 35)}, 100);
-    }
-
-    bool sendcommand(const http::inputtype& in, http::outputtype& out) const
-    {
-        return httpIf->get(in, out);
-    }
-
-    template <typename In = http::inputtype>
-    std::string sendcommand(const In& in) const
-    {
-        std::string resp;
-        httpIf->get(in, resp);
-        return resp;
-    }
-
     void speak(task what, bool async = true)
     {
-        if (ttsIf)
+        if (isttssupported())
         {
             if (async)
             {
@@ -616,6 +459,292 @@ struct Robot::Handler
                 ttsIf->speak(getttstext(what, inlang));
             }
         }
+        else
+        {
+            log(logging::type::debug, "tts not supported");
+        }
+    }
+
+  private:
+    std::string module{"librobot"};
+    std::shared_ptr<http::HttpIf> httpIf;
+    std::shared_ptr<tts::TextToVoiceIf> ttsIf;
+    std::shared_ptr<logging::LogIf> logIf;
+    std::future<void> ttsasync;
+    bool ledstatus{};
+    struct MoveJoint
+    {
+        MoveJoint(Handler* handler, uint32_t joint, int32_t setangle) :
+            handler{handler}, setpoint{setangle},
+            currangle{handler->geteoatangle()}
+        {
+            if (!isatposition())
+            {
+                auto angle = handler->angleadapt(setpoint);
+                handler->sendcommand({{"T", 121},
+                                      {"joint", joint},
+                                      {"angle", angle},
+                                      {"spd", 50},
+                                      {"acc", 10}});
+                waitmoving();
+            }
+        }
+
+        std::pair<bool, int32_t> getstatus() const
+        {
+            return {isatposition(), currangle};
+        }
+
+      private:
+        const Handler* handler;
+        const int32_t setpoint;
+        const uint32_t maxrepeats{3};
+        int32_t currangle{}, prevangle{};
+        uint32_t repeats{};
+
+        bool isatposition() const
+        {
+            return handler->isposaccepted(currangle, setpoint, anglemargin);
+        }
+
+        void waitmoving()
+        {
+            while ((currangle = handler->geteoatangle()) != setpoint)
+            {
+                if (currangle == prevangle)
+                {
+                    if (isatposition())
+                    {
+                        handler->log(logging::type::debug,
+                                     "Joint not in setpoint, but within "
+                                     "acceptable position");
+                        break;
+                    }
+                    if (repeats++ == maxrepeats)
+                    {
+                        handler->log(logging::type::warning,
+                                     "Joint cannot reach setpoint");
+                        break;
+                    }
+                }
+                else
+                {
+                    repeats = 0;
+                    prevangle = currangle;
+                }
+            }
+        }
+    };
+    struct MoveXyz
+    {
+        MoveXyz(Handler* handler, xyzt_t setpos) :
+            MoveXyz(handler, setpos, 0, [&]() {
+                const auto [x, y, z, t] = setpos;
+                auto angle = handler->dgrtorad(handler->angleadapt(t));
+                handler->sendcommand(
+                    {{"T", 1041}, {"x", x}, {"y", y}, {"z", z}, {"t", angle}});
+            })
+        {}
+
+        MoveXyz(Handler* handler, xyzt_t setpos, uint32_t delayms) :
+            MoveXyz(handler, setpos, delayms, [&]() {
+                const auto [x, y, z, t] = setpos;
+                auto angle = handler->dgrtorad(handler->angleadapt(t));
+                handler->sendcommand(
+                    {{"T", 1041}, {"x", x}, {"y", y}, {"z", z}, {"t", angle}});
+            })
+        {}
+
+        MoveXyz(Handler* handler, const xyzt_t& setpos, double speed) :
+            MoveXyz(handler, setpos, 0, [&]() {
+                const auto [x, y, z, t] = setpos;
+                auto angle = handler->dgrtorad(handler->angleadapt(t));
+                handler->sendcommand({{"T", 104},
+                                      {"x", x},
+                                      {"y", y},
+                                      {"z", z},
+                                      {"t", angle},
+                                      {"spd", speed}});
+            })
+        {}
+
+        std::pair<bool, xyz_t> getstatus() const
+        {
+            return {isatposition(), currpos};
+        }
+
+      private:
+        MoveXyz(
+            Handler* handler, const xyzt_t& setpos, uint32_t delayms,
+            auto sendcommand = []() {}) :
+            handler{handler},
+            setpoint{adapt(setpos)}
+        {
+            sendcommand();
+            if (!delayms)
+                waitmoving();
+            else
+                usleep(delayms * 1000);
+        }
+
+      private:
+        const Handler* handler;
+        const xyz_t setpoint;
+        const uint32_t maxrepeats{3};
+        xyz_t currpos{}, prevpos{};
+        uint32_t repeats{};
+
+        xyz_t adapt(xyzt_t pos) const
+        {
+            return {std::get<0>(pos), std::get<1>(pos), std::get<2>(pos)};
+        }
+
+        bool isatposition() const
+        {
+            return handler->isposaccepted(currpos, setpoint, xyztmargin);
+        }
+
+        void waitmoving()
+        {
+            while ((currpos = handler->getxyz()) != setpoint)
+            {
+                if (currpos == prevpos)
+                {
+                    if (isatposition())
+                    {
+                        handler->log(logging::type::debug,
+                                     "xyzt not in setpoint, but within "
+                                     "acceptable position");
+                        break;
+                    }
+                    if (repeats++ == maxrepeats)
+                    {
+                        handler->log(logging::type::warning,
+                                     "xyzt position cannot reach setpoint");
+                        break;
+                    }
+                }
+                else
+                {
+                    repeats = 0;
+                    prevpos = currpos;
+                }
+            }
+        }
+    };
+
+    bool changelanguage(tts::language newlang)
+    {
+        if (isttssupported())
+        {
+            auto voice = ttsIf->getvoice();
+            auto& lang = std::get<0>(voice);
+            if (lang != newlang)
+            {
+                lang = newlang;
+                speak(task::langchangestart);
+                waitspeakdone();
+                ttsIf->setvoice(voice);
+                speak(task::langchangeend);
+            }
+            else
+            {
+                speak(task::nothingtodo);
+            }
+            return true;
+        }
+        log(logging::type::debug, "tts not supported");
+        return false;
+    }
+
+    constexpr int32_t angleadapt(int32_t angle) const
+    {
+        return eoatanglebase - angle;
+    }
+
+    constexpr double radtodgr(double rad) const
+    {
+        return std::round(rad * 180. / std::numbers::pi_v<double>);
+    }
+
+    constexpr double dgrtorad(double dgr) const
+    {
+        return dgr * std::numbers::pi_v<double> / 180.;
+    }
+
+    xyz_t getxyz() const
+    {
+        http::outputtype ret;
+        sendcommand({{"T", 105}}, ret);
+        return {(int32_t)std::get<double>(ret.at("x")),
+                (int32_t)std::get<double>(ret.at("y")),
+                (int32_t)std::get<double>(ret.at("z"))};
+    }
+
+    xyzt_t getxyzt() const
+    {
+        http::outputtype ret;
+        sendcommand({{"T", 105}}, ret);
+        return {(int32_t)std::get<double>(ret.at("x")),
+                (int32_t)std::get<double>(ret.at("y")),
+                (int32_t)std::get<double>(ret.at("z")),
+                eoatanglebase -
+                    (int32_t)radtodgr(std::get<double>(ret.at("t")))};
+    }
+
+    int32_t geteoatangle() const
+    {
+        return std::get<3>(getxyzt());
+    }
+
+    std::pair<bool, xyz_t> movetopos(const xyzt_t& pos)
+    {
+        MoveXyz eoat{this, pos};
+        return eoat.getstatus();
+    }
+
+    std::pair<bool, xyz_t> movetopos(const xyzt_t& pos, uint32_t delayms)
+    {
+        MoveXyz eoat{this, pos, delayms};
+        return eoat.getstatus();
+    }
+
+    std::pair<bool, xyz_t> movetopos(xyzt_t pos, double spd)
+    {
+        MoveXyz eoat{this, pos, spd};
+        return eoat.getstatus();
+    }
+
+    xyz_t movehandshakepos()
+    {
+        return std::get<xyz_t>(movetopos({175, 235, 325, 35}));
+    }
+
+    void dohandshake(uint32_t num)
+    {
+        while (num--)
+        {
+            movetopos({220, 280, 40, 0}, 700u);
+            movetopos({210, 255, 300, 0}, 700u);
+        }
+    }
+
+    void movedancebasepos()
+    {
+        movetopos({175, 235, 325, 35}, 100.f);
+    }
+
+    bool sendcommand(const http::inputtype& in, http::outputtype& out) const
+    {
+        return httpIf->get(in, out);
+    }
+
+    template <typename In = http::inputtype>
+    std::string sendcommand(const In& in) const
+    {
+        std::string resp;
+        httpIf->get(in, resp);
+        return resp;
     }
 
     void waitspeakdone()
@@ -636,9 +765,25 @@ struct Robot::Handler
         return str;
     }
 
-    bool isposaccepted(int32_t present, int32_t expected) const
+    bool isposaccepted(Positional auto present, Positional auto expected,
+                       Difflimit auto limit) const
     {
-        return std::abs(present - expected) <= posmargin;
+        return std::abs(present - expected) <= limit;
+    }
+
+    bool isposaccepted(const TupleType auto& present,
+                       const TupleType auto& expected,
+                       Difflimit auto limit) const
+    {
+        return std::apply(
+            [&](auto... x) {
+                return std::apply(
+                    [&](auto... y) {
+                        return (isposaccepted(x, y, limit) && ...);
+                    },
+                    expected);
+            },
+            present);
     }
 };
 
@@ -674,7 +819,7 @@ bool Robot::readservosinfo(bool isshown)
 bool Robot::openeoat(bool isshown)
 {
     if (isshown)
-        return handler->iseoatclosed();
+        return !handler->iseoatopened();
     return !handler->openeoat();
 }
 
@@ -757,11 +902,87 @@ bool Robot::shakehand(bool isshown)
     return false;
 }
 
-bool Robot::dance(bool isshown)
+bool Robot::dancesing(bool isshown)
 {
     if (isshown)
         return true;
-    handler->dance();
+
+    handler->dance(
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
+            {
+                tts::TextToVoiceIf::kill();
+                return;
+            };
+
+            auto phrases =
+                std::to_array<task>({task::songlinefirst, task::songlinesecond,
+                                     task::songlinethird, task::songlineforth});
+            uint32_t cnt{};
+            while (!running.stop_requested())
+            {
+                auto num = (cnt++) % phrases.size();
+                handler->speak(phrases[num], false);
+            }
+        },
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
+            {
+                return;
+            }
+
+            bool increase{true};
+            int32_t level{}, step{5};
+            while (!running.stop_requested())
+            {
+                increase = level > 120 ? false : level < 10 ? true : increase;
+                level += increase ? step : -step;
+                handler->setledon((uint8_t)level);
+                usleep(1000);
+            }
+            handler->setledoff();
+        });
+    return false;
+}
+
+bool Robot::dancestream(bool isshown)
+{
+    if (isshown)
+        return true;
+
+    handler->dance(
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
+            {
+                shell::BashCommand().run("killall -s KILL ffplay");
+                return;
+            }
+
+            while (!running.stop_requested())
+            {
+                shell::BashCommand().run(
+                    "yt-dlp https://youtu.be/DedaEVIbTkY -o - 2>/dev/null | "
+                    "ffplay "
+                    "-nodisp -autoexit -nostats - &> /dev/null");
+            }
+        },
+        [this](std::stop_token running, bool cleanup) {
+            if (cleanup)
+            {
+                return;
+            }
+
+            bool increase{true};
+            int32_t level{}, step{5};
+            while (!running.stop_requested())
+            {
+                increase = level > 120 ? false : level < 10 ? true : increase;
+                level += increase ? step : -step;
+                handler->setledon((uint8_t)level);
+                usleep(1000);
+            }
+            handler->setledoff();
+        });
     return false;
 }
 
@@ -778,6 +999,25 @@ bool Robot::enlight(bool isshown)
     if (isshown)
         return true;
     handler->enlight();
+    return false;
+}
+
+bool Robot::doheman(bool isshown)
+{
+    if (isshown)
+        return true;
+
+    handler->doheman([this](std::stop_token, bool cleanup) {
+        if (cleanup)
+        {
+            shell::BashCommand().run("killall -s KILL ffplay");
+            return;
+        }
+
+        shell::BashCommand().run(
+            "yt-dlp https://youtu.be/V8h8snfYidg -o - 2>/dev/null | ffplay "
+            "-nodisp -autoexit -nostats - &> /dev/null");
+    });
     return false;
 }
 
@@ -804,7 +1044,7 @@ bool Robot::sendusercmd(bool isshown)
 bool Robot::changevoice(bool isshown)
 {
     if (isshown)
-        return true;
+        return handler->isttssupported();
     handler->changevoice();
     return false;
 }
@@ -812,25 +1052,25 @@ bool Robot::changevoice(bool isshown)
 bool Robot::changelangtopolish(bool isshown)
 {
     if (isshown)
-        return handler->getlanguage() != tts::language::polish;
-    handler->changelangtopolish();
-    return false;
+        return handler->isttssupported() &&
+               handler->getlanguage() != tts::language::polish;
+    return !handler->changelangtopolish();
 }
 
 bool Robot::changelangtoenglish(bool isshown)
 {
     if (isshown)
-        return handler->getlanguage() != tts::language::english;
-    handler->changelangtoenglish();
-    return false;
+        return handler->isttssupported() &&
+               handler->getlanguage() != tts::language::english;
+    return !handler->changelangtoenglish();
 }
 
 bool Robot::changelangtogerman(bool isshown)
 {
     if (isshown)
-        return handler->getlanguage() != tts::language::german;
-    handler->changelangtogerman();
-    return false;
+        return handler->isttssupported() &&
+               handler->getlanguage() != tts::language::german;
+    return !handler->changelangtogerman();
 }
 
 } // namespace robot::roarmm2
